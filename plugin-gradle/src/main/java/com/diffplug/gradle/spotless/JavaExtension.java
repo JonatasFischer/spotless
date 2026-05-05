@@ -36,6 +36,7 @@ import org.gradle.api.tasks.SourceSet;
 import org.gradle.api.tasks.SourceSetContainer;
 
 import com.diffplug.spotless.FormatterStep;
+import com.diffplug.spotless.extra.java.EclipseJdtCleanUpStep;
 import com.diffplug.spotless.extra.java.EclipseJdtFormatterStep;
 import com.diffplug.spotless.generic.LicenseHeaderStep;
 import com.diffplug.spotless.java.CleanthatJavaStep;
@@ -385,6 +386,38 @@ public class JavaExtension extends FormatExtension implements HasBuiltinDelimite
 			return this;
 		}
 
+	}
+
+	public EclipseCleanUpConfig eclipseCleanUp() {
+		return eclipseCleanUp(EclipseJdtCleanUpStep.defaultVersion());
+	}
+
+	public EclipseCleanUpConfig eclipseCleanUp(String version) {
+		return new EclipseCleanUpConfig(version);
+	}
+
+	public class EclipseCleanUpConfig {
+		private final EclipseJdtCleanUpStep.Builder builder;
+
+		EclipseCleanUpConfig(String version) {
+			builder = EclipseJdtCleanUpStep.createBuilder(provisioner(), p2Provisioner());
+			builder.setVersion(version);
+			addStep(builder.build());
+		}
+
+		public EclipseCleanUpConfig configFile(Object... configFiles) {
+			requireElementsNonNull(configFiles);
+			Project project = getProject();
+			builder.setPreferences(project.files(configFiles).getFiles());
+			replaceStep(builder.build());
+			return this;
+		}
+
+		public EclipseCleanUpConfig withP2Mirrors(Map<String, String> mirrors) {
+			builder.setP2Mirrors(mirrors);
+			replaceStep(builder.build());
+			return this;
+		}
 	}
 
 	/** Removes newlines between type annotations and types. */

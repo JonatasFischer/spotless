@@ -1,0 +1,26 @@
+package test;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class CleanUpExample {
+
+	public List<String> buildList(final String prefix) {
+		final List<String> result = new ArrayList<>();
+		final String separator = ", ";
+		for (int i = 0; i < 10; i++) {
+			final String item = prefix + separator + i;
+			result.add(item);
+		}
+		return result;
+	}
+
+	public void unusedImportExample() {
+		final List<String> list = new ArrayList<>();
+		list.add("hello");
+	}
+
+	public Runnable lambdaExample() {
+		return () -> System.out.println("hello");
+	}
+}

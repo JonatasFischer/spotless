@@ -1,0 +1,32 @@
+package test;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Date;
+
+public class CleanUpExample {
+
+	public List<String> buildList(String prefix) {
+		List<String> result = new ArrayList<>();
+		String separator = ", ";
+		for (int i = 0; i < 10; i++) {
+			String item = prefix + separator + i;
+			result.add(item);
+		}
+		return result;
+	}
+
+	public void unusedImportExample() {
+		List<String> list = new ArrayList<>();
+		list.add("hello");
+	}
+
+	public Runnable lambdaExample() {
+		return new Runnable() {
+			@Override
+			public void run() {
+				System.out.println("hello");
+			}
+		};
+	}
+}

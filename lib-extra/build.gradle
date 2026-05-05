@@ -30,6 +30,9 @@ dependencies {
 	testImplementation libs.assertj.core
 	testImplementation libs.durian.testlib
 	testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+	// selfie-runner-junit5 pulls junit-platform-launcher:1.0.0 which is incompatible
+	// with junit-jupiter:6.x. Force resolution to a compatible version.
+	testRuntimeOnly "org.junit.platform:junit-platform-launcher:6.0.3"
 }
 
 spotless {
@@ -90,6 +93,8 @@ p2deps {
 	into 'jdtCompileOnly', {
 		p2repo 'https://download.eclipse.org/eclipse/updates/4.26/'
 		install 'org.eclipse.jdt.core'
+		install 'org.eclipse.jdt.core.manipulation'
+		install 'org.eclipse.ltk.core.refactoring'
 	}
 }
 
