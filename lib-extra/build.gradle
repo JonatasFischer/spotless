@@ -91,7 +91,12 @@ p2deps {
 		install 'org.codehaus.groovy'
 	}
 	into 'jdtCompileOnly', {
-		p2repo 'https://download.eclipse.org/eclipse/updates/4.26/'
+		// Bumped from 4.26 to 4.39 to match the runtime version declared in
+		// EclipseJdtFormatterStep / EclipseJdtCleanUpStep JVM_SUPPORT.
+		// 4.39's org.eclipse.jdt.core.manipulation removed several legacy *Core
+		// classes (MapCleanUpOptionsCore, ICleanUpCore, AbstractMultiFixCore),
+		// so compile-time and runtime must agree.
+		p2repo 'https://download.eclipse.org/eclipse/updates/4.39/'
 		install 'org.eclipse.jdt.core'
 		install 'org.eclipse.jdt.core.manipulation'
 		install 'org.eclipse.ltk.core.refactoring'

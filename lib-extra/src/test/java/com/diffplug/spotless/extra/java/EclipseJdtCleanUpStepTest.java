@@ -20,21 +20,21 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import com.diffplug.spotless.ResourceHarness;
 import com.diffplug.spotless.StepHarness;
 import com.diffplug.spotless.TestP2Provisioner;
 import com.diffplug.spotless.TestProvisioner;
 import com.diffplug.spotless.extra.EquoBasedStepBuilder;
 
-class EclipseJdtCleanUpStepTest {
+class EclipseJdtCleanUpStepTest extends ResourceHarness {
 
 	private static EquoBasedStepBuilder createBuilder() {
 		return EclipseJdtCleanUpStep.createBuilder(TestProvisioner.mavenCentral(), TestP2Provisioner.defaultProvisioner());
 	}
 
 	@Test
-	void cleanUp_makeLocalVariableFinal_useLambda_removeUnusedImports() {
-		ClassLoader classLoader = getClass().getClassLoader();
-		File configFile = new File(classLoader.getResource("java/eclipse/cleanup/cleanup.xml").getFile());
+	void cleanUp_makesLocalsAndParametersFinal() {
+		File configFile = setFile("cleanup.xml").toResource("java/eclipse/cleanup/cleanup.xml");
 		EquoBasedStepBuilder builder = createBuilder();
 		builder.setPreferences(List.of(configFile));
 		StepHarness.forStep(builder.build())

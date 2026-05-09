@@ -2,7 +2,6 @@ package test;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Date;
 
 public class CleanUpExample {
 
@@ -16,17 +15,14 @@ public class CleanUpExample {
 		return result;
 	}
 
-	public void unusedImportExample() {
-		List<String> list = new ArrayList<>();
-		list.add("hello");
-	}
-
-	public Runnable lambdaExample() {
-		return new Runnable() {
-			@Override
-			public void run() {
-				System.out.println("hello");
+	public int countOver(int threshold) {
+		int count = 0;
+		int[] values = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+		for (int v : values) {
+			if (v > threshold) {
+				count++;
 			}
-		};
+		}
+		return count;
 	}
 }

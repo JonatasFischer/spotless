@@ -59,6 +59,10 @@ public class Java extends FormatterFactory {
 		addStepFactory(eclipse);
 	}
 
+	public void addEclipseCleanUp(EclipseCleanUp eclipseCleanUp) {
+		addStepFactory(eclipseCleanUp);
+	}
+
 	public void addGoogleJavaFormat(GoogleJavaFormat googleJavaFormat) {
 		addStepFactory(googleJavaFormat);
 	}
