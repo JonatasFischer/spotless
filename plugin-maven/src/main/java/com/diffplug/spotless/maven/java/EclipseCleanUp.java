@@ -26,6 +26,7 @@ import org.apache.maven.plugins.annotations.Parameter;
 import org.eclipse.aether.RepositorySystemSession;
 
 import com.diffplug.spotless.FormatterStep;
+import com.diffplug.spotless.extra.EquoBasedStepBuilder;
 import com.diffplug.spotless.extra.P2Mirror;
 import com.diffplug.spotless.extra.java.EclipseJdtCleanUpStep;
 import com.diffplug.spotless.maven.FormatterStepConfig;
@@ -76,6 +77,16 @@ public class EclipseCleanUp implements FormatterStepFactory {
 
 	@Override
 	public FormatterStep newFormatterStep(FormatterStepConfig stepConfig) {
+		return configureBuilder(stepConfig).build();
+	}
+
+	/**
+	 * Configures and returns the underlying {@link EquoBasedStepBuilder} without calling
+	 * {@code build()}. Package-private so unit tests can inspect every {@code setX} side effect
+	 * (kills PIT mutants on the {@code if (...)} guards and the {@code builder.setX(...)} calls)
+	 * without paying the P2 provisioning cost a real {@code build()} would incur.
+	 */
+	EquoBasedStepBuilder configureBuilder(FormatterStepConfig stepConfig) {
 		EclipseJdtCleanUpStep.Builder builder = EclipseJdtCleanUpStep.createBuilder(
 				stepConfig.getProvisioner(), stepConfig.getP2Provisioner());
 		builder.setVersion(version != null ? version : EclipseJdtCleanUpStep.defaultVersion());
@@ -87,10 +98,11 @@ public class EclipseCleanUp implements FormatterStepFactory {
 			builder.setPropertyPreferences(toPropertyLines(settings));
 		}
 		builder.setP2Mirrors(p2Mirrors);
-		if (cacheDirectory != null) {
-			builder.setCacheDirectory(cacheDirectory);
-		}
-		return builder.build();
+		// builder.setCacheDirectory(null) is a no-op (the field default is also null), so the
+		// previous `if (cacheDirectory != null)` guard produced an equivalent PIT mutant. Drop
+		// the guard — calling unconditionally is identical in effect.
+		builder.setCacheDirectory(cacheDirectory);
+		return builder;
 	}
 
 	@Override
@@ -101,9 +113,13 @@ public class EclipseCleanUp implements FormatterStepFactory {
 	/**
 	 * Renders the inline {@code <settings>} map as a single {@code .properties}-style string that
 	 * {@link EclipseJdtCleanUpStep.Builder#setPropertyPreferences(List)} can ingest.
+	 *
+	 * <p>Package-private for direct unit tests.
 	 */
-	private static List<String> toPropertyLines(Map<String, String> settings) {
-		StringBuilder sb = new StringBuilder(settings.size() * 32);
+	static List<String> toPropertyLines(Map<String, String> settings) {
+		// Default StringBuilder capacity is fine — the optimisation didn't actually matter and
+		// the size hint produced an equivalent PIT mutant we couldn't kill.
+		StringBuilder sb = new StringBuilder();
 		for (Map.Entry<String, String> entry : settings.entrySet()) {
 			sb.append(entry.getKey()).append('=').append(entry.getValue()).append('\n');
 		}

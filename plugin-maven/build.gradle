@@ -4,6 +4,7 @@ import org.gradlex.maven.plugin.development.task.GenerateMavenPluginDescriptorTa
 plugins {
 	// https://github.com/gradlex-org/maven-plugin-development
 	alias libs.plugins.maven.plugin.development
+	id 'jacoco'
 }
 
 apply from: rootProject.file('gradle/changelog.gradle')
@@ -61,3 +62,7 @@ tasks.withType(Test).configureEach {
 }
 
 apply from: rootProject.file("gradle/java-publish.gradle")
+
+// JaCoCo + PIT gates for the EclipseCleanUp mojo. Kept in a dedicated script
+// so this build file stays focused on Maven plugin packaging concerns.
+apply from: 'cleanup-coverage.gradle'
