@@ -22,8 +22,6 @@ import org.eclipse.jdt.core.IBufferChangedListener;
 import org.eclipse.jdt.core.IOpenable;
 import org.eclipse.jdt.core.JavaModelException;
 
-import com.diffplug.spotless.extra.glue.jdt.SuppressFBWarnings;
-
 /**
  * Minimal mutable buffer wrapping a Java source string. Used by the headless JDT cleanup pipeline
  * — never registered with the workbench {@code BufferManager}, only consulted directly by our
@@ -32,7 +30,6 @@ import com.diffplug.spotless.extra.glue.jdt.SuppressFBWarnings;
  * <p>Mutating methods use {@link StringBuilder} so cumulative O(n²) cost is avoided when JDT
  * applies many small edits.
  */
-@SuppressFBWarnings(value = "EQ_DOESNT_OVERRIDE_EQUALS", justification = "equals not used in clean-up context")
 final class StubBuffer implements IBuffer {
 
 	private final StringBuilder contents;

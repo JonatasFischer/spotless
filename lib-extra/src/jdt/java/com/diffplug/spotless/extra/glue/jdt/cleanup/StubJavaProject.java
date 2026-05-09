@@ -17,8 +17,7 @@ package com.diffplug.spotless.extra.glue.jdt.cleanup;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import java.util.function.UnaryOperator;
 
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.runtime.preferences.IEclipsePreferences;
@@ -37,22 +36,37 @@ import org.eclipse.jdt.internal.core.JavaProject;
  */
 final class StubJavaProject extends JavaProject {
 
-	private static final Logger LOGGER = Logger.getLogger(StubJavaProject.class.getName());
-
 	/** Stub IProject is initialised first because INSTANCE creation depends on it. */
 	private static final IProject STUB_PROJECT = StubProxies.createStubProject();
-	static final StubJavaProject INSTANCE = createInstance();
+	static final StubJavaProject INSTANCE = createInstance("project");
+
+	/**
+	 * Test-only seam: swappable function used by {@link #getOption(String, boolean)} when the
+	 * caller asks for an inherited value. Defaults to {@link JavaCore#getOption(String)}; tests
+	 * can replace it with a deterministic lookup so PIT mutants on the inheritance ternary can
+	 * be killed without depending on a fully initialised OSGi runtime.
+	 */
+	@SuppressWarnings("CanBeFinal")
+	static volatile UnaryOperator<String> JAVA_CORE_LOOKUP = JavaCore::getOption;
 
 	private StubJavaProject() {
 		super(null, null);
 	}
 
-	private static StubJavaProject createInstance() {
+	/**
+	 * Builds a {@link StubJavaProject} and wires its {@code projectFieldName} field on
+	 * {@link JavaProject} via reflection. Package-private and parameterised so unit tests can
+	 * pass an unknown field name to verify the failure path; production code always calls it
+	 * with {@code "project"}.
+	 */
+	static StubJavaProject createInstance(String projectFieldName) {
 		StubJavaProject inst = new StubJavaProject();
 		try {
-			StubProxies.setField(inst, JavaProject.class, "project", STUB_PROJECT);
+			StubProxies.setField(inst, JavaProject.class, projectFieldName, STUB_PROJECT);
 		} catch (ReflectiveOperationException e) {
-			LOGGER.log(Level.FINE, e, () -> "Could not set StubJavaProject.project; some cleanups may fail");
+			throw new IllegalStateException(
+					"Eclipse JDT API changed: JavaProject#" + projectFieldName + " is missing; please update spotless",
+					e);
 		}
 		return inst;
 	}
@@ -86,7 +100,10 @@ final class StubJavaProject extends JavaProject {
 				|| JavaCore.COMPILER_CODEGEN_TARGET_PLATFORM.equals(optionName)) {
 			return CleanUpConstants.JAVA_LEVEL;
 		}
-		return inheritJavaCoreOptions ? JavaCore.getOption(optionName) : null;
+		if (inheritJavaCoreOptions) {
+			return JAVA_CORE_LOOKUP.apply(optionName);
+		}
+		return null;
 	}
 
 	/**

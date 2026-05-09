@@ -1,6 +1,7 @@
 plugins {
 	id 'java-library'
 	id 'dev.equo.p2deps'
+	id 'jacoco'
 }
 ext.artifactId = project.artifactIdLibExtra
 version = rootProject.spotlessChangelog.versionNext
@@ -79,6 +80,10 @@ def jar = tasks.named('jar', Jar) {
 tasks.withType(Test).configureEach {
 	dependsOn jar
 	classpath += jar.get().outputs.files
+	// Make the JDT classes visible to test JVMs without going through the P2
+	// isolated classloader. Required for JaCoCo to instrument the cleanup/*
+	// classes when unit tests load them via the main classloader.
+	classpath += sourceSets.named('jdt').get().compileClasspath
 }
 
 apply plugin: 'dev.equo.p2deps'
@@ -115,3 +120,8 @@ spotbugs {
 	reportLevel = com.github.spotbugs.snom.Confidence.valueOf('LOW')
 	excludeFilter = file("spotbugs-exclude.xml")
 }
+
+// JaCoCo + PIT mutation-testing gates for the Eclipse JDT Clean Up step. All
+// configuration lives in a dedicated script so this build file stays focused
+// on dependencies / source sets / publishing.
+apply from: 'cleanup-coverage.gradle'

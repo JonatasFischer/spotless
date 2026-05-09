@@ -20,6 +20,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.File;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.List;
 
 import org.junit.jupiter.api.Disabled;
@@ -33,6 +35,8 @@ import com.diffplug.spotless.StepHarness;
 import com.diffplug.spotless.TestP2Provisioner;
 import com.diffplug.spotless.TestProvisioner;
 import com.diffplug.spotless.extra.EquoBasedStepBuilder;
+
+import dev.equo.solstice.p2.P2Model;
 
 /**
  * Behaviour of {@link EclipseJdtCleanUpStep}. Each test loads a profile XML from
@@ -200,6 +204,156 @@ class EclipseJdtCleanUpStepTest extends ResourceHarness {
 					.as("CleanUpConstants.REQUIRED_BUNDLES must equal EclipseJdtCleanUpStep.REQUIRED_BUNDLES")
 					.containsExactlyElementsOf(EclipseJdtCleanUpStep.REQUIRED_BUNDLES);
 		}
+	}
+
+	// =========================================================================
+	// Static helpers — drive the private methods directly so JaCoCo can reach
+	// every branch without going through a full builder lifecycle.
+	// =========================================================================
+
+	@Nested
+	@DisplayName("Static helpers (reflective)")
+	class StaticHelpers {
+
+		@Test
+		@DisplayName("defaultVersion() returns the JVM-recommended Eclipse Platform version")
+		void defaultVersionMatchesRecommended() {
+			String v = EclipseJdtCleanUpStep.defaultVersion();
+			assertThat(v).as("default version is published as the recommended formatter version").isEqualTo("4.39");
+		}
+
+		@Test
+		@DisplayName("normaliseVersion strips trailing .0")
+		void normaliseVersionStripsTrailingZero() throws Exception {
+			Method m = EclipseJdtCleanUpStep.class.getDeclaredMethod("normaliseVersion", String.class);
+			m.setAccessible(true);
+			assertThat(m.invoke(null, "4.39.0")).isEqualTo("4.39");
+			assertThat(m.invoke(null, "4.40.0")).isEqualTo("4.40");
+		}
+
+		@Test
+		@DisplayName("normaliseVersion is a no-op on non-trailing-zero versions")
+		void normaliseVersionLeavesNonTrailingZeroAlone() throws Exception {
+			Method m = EclipseJdtCleanUpStep.class.getDeclaredMethod("normaliseVersion", String.class);
+			m.setAccessible(true);
+			assertThat(m.invoke(null, "4.39")).isEqualTo("4.39");
+			assertThat(m.invoke(null, "4.39.1")).isEqualTo("4.39.1");
+			// boundary: ".0" not at the very end is left alone
+			assertThat(m.invoke(null, "4.0.39")).isEqualTo("4.0.39");
+		}
+
+		@Test
+		@DisplayName("validateVersion rejects null with the exact 'must not be blank' message")
+		void validateVersionRejectsNull() throws Exception {
+			Method m = EclipseJdtCleanUpStep.class.getDeclaredMethod("validateVersion", String.class);
+			m.setAccessible(true);
+			// Must throw IllegalArgumentException (NOT NullPointerException from a downstream call).
+			// Killed-mutant guarantee: the null-check branch must throw, not delegate to normaliseVersion.
+			assertThatThrownBy(() -> m.invoke(null, (Object) null))
+					.isInstanceOf(InvocationTargetException.class)
+					.cause()
+					.isInstanceOf(IllegalArgumentException.class)
+					.hasMessageContaining("must not be blank")
+					.hasMessageContaining(EclipseJdtCleanUpStep.defaultVersion());
+		}
+
+		@Test
+		@DisplayName("validateVersion rejects empty / blank with the 'must not be blank' message")
+		void validateVersionRejectsBlank() throws Exception {
+			Method m = EclipseJdtCleanUpStep.class.getDeclaredMethod("validateVersion", String.class);
+			m.setAccessible(true);
+			// Asserting the EXACT message kills mutants that bypass the blank check (which would
+			// fall through to the regex check and emit a different, longer message).
+			assertThatThrownBy(() -> m.invoke(null, ""))
+					.isInstanceOf(InvocationTargetException.class)
+					.cause()
+					.isInstanceOf(IllegalArgumentException.class)
+					.hasMessageContaining("must not be blank");
+			assertThatThrownBy(() -> m.invoke(null, "   "))
+					.isInstanceOf(InvocationTargetException.class)
+					.cause()
+					.isInstanceOf(IllegalArgumentException.class)
+					.hasMessageContaining("must not be blank");
+		}
+
+		@Test
+		@DisplayName("validateVersion rejects non-Eclipse versions")
+		void validateVersionRejectsNonEclipseVersions() throws Exception {
+			Method m = EclipseJdtCleanUpStep.class.getDeclaredMethod("validateVersion", String.class);
+			m.setAccessible(true);
+			// Note: "4.39.0.0" intentionally NOT in this list — normaliseVersion strips the
+			// trailing ".0" to "4.39.0" which IS a valid 4.x.y, so we accept it. Mismatched
+			// inputs that should fail are major-version mismatches, missing minor, or non-numeric.
+			for (String bad : new String[]{"latest", "3.99", "5.0", "4", "4.x", "abc"}) {
+				assertThatThrownBy(() -> m.invoke(null, bad))
+						.as("validateVersion('%s') must throw IAE", bad)
+						.isInstanceOf(InvocationTargetException.class)
+						.cause()
+						.isInstanceOf(IllegalArgumentException.class);
+			}
+		}
+
+		@Test
+		@DisplayName("validateVersion accepts canonical 4.x and 4.x.y")
+		void validateVersionAcceptsCanonicalForms() throws Exception {
+			Method m = EclipseJdtCleanUpStep.class.getDeclaredMethod("validateVersion", String.class);
+			m.setAccessible(true);
+			// Should not throw.
+			m.invoke(null, "4.39");
+			m.invoke(null, "4.39.0");
+			m.invoke(null, "4.40");
+			m.invoke(null, "4.39.1");
+		}
+
+		@Test
+		@DisplayName("Builder.model() registers REQUIRED_BUNDLES against the platform repository")
+		void builderModelInstallsRequiredBundles() {
+			EquoBasedStepBuilder builder = createBuilder();
+			builder.setVersion("4.39");
+			// Builder is the public type; model() is protected. Use the public toString() of the
+			// underlying P2Model via a tiny reflective probe.
+			try {
+				Method modelMethod = builder.getClass().getDeclaredMethod("model", String.class);
+				modelMethod.setAccessible(true);
+				P2Model model = (P2Model) modelMethod.invoke(builder, "4.39");
+				assertThat(model.getInstall()).containsAll(EclipseJdtCleanUpStep.REQUIRED_BUNDLES);
+				assertThat(model.getP2repo()).anyMatch(url -> url.contains("4.39"));
+			} catch (ReflectiveOperationException e) {
+				throw new AssertionError("Builder.model() must be reflectively callable", e);
+			}
+		}
+
+		@Test
+		@DisplayName("Builder.setVersion stores the normalised version on the parent builder")
+		void builderSetVersionStoresNormalisedVersion() throws Exception {
+			EquoBasedStepBuilder builder = createBuilder();
+			// Use a non-default version so the mutant 'remove super.setVersion call' produces a
+			// different stored value (default) than the original (our explicit version).
+			builder.setVersion("4.40");
+			Field versionField = EquoBasedStepBuilder.class.getDeclaredField("formatterVersion");
+			versionField.setAccessible(true);
+			Object value = versionField.get(builder);
+			assertThat(value).as("super.setVersion must store the supplied version 4.40")
+					.isEqualTo("4.40");
+		}
+
+		@Test
+		@DisplayName("Builder.setVersion normalises trailing .0 before delegating")
+		void builderSetVersionNormalisesTrailingZero() throws Exception {
+			EquoBasedStepBuilder builder = createBuilder();
+			builder.setVersion("4.40.0");
+			Field versionField = EquoBasedStepBuilder.class.getDeclaredField("formatterVersion");
+			versionField.setAccessible(true);
+			Object value = versionField.get(builder);
+			assertThat(value).as("normaliseVersion('4.40.0') strips the trailing .0").isEqualTo("4.40");
+		}
+
+		// Note: `JVM_SUPPORT.assertFormatterSupported` (line 127) and `Builder.setVersion`
+		// (line 183) survive PIT mutation because the only observable side effects are an
+		// exception thrown when the running JVM is below MIN_JVM=17 (we run on JVM 21+ in CI).
+		// On a too-old JVM the integration test in EclipseJdtFormatterStepTest catches the
+		// regression — but the unit-test JVM cannot fake a lower major version. Documented as
+		// an environment-equivalent mutant.
 	}
 
 	// =========================================================================

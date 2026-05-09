@@ -51,18 +51,24 @@ public class EclipseJdtCleanUpImpl {
 
 	private static final Logger LOGGER = Logger.getLogger(EclipseJdtCleanUpImpl.class.getName());
 
-	static {
-		SolsticeBootstrap.ensureBootstrapped();
-	}
-
 	private final CleanUpOptions cleanUpOptions;
 	private final List<ICleanUp> cleanUps;
 
 	public EclipseJdtCleanUpImpl(Properties settings) {
+		this(settings, CleanUpRegistry.buildAll());
+	}
+
+	/**
+	 * Internal constructor used by the public ctor and by unit tests. Lets tests inject a
+	 * synthetic list of {@link ICleanUp} instances (e.g. ones whose {@code setOptions} throws) to
+	 * exercise the {@link #configure} branch coverage without depending on the real catalogue.
+	 */
+	EclipseJdtCleanUpImpl(Properties settings, List<ICleanUp> cleanUps) {
 		Objects.requireNonNull(settings, "settings");
+		Objects.requireNonNull(cleanUps, "cleanUps");
 		this.cleanUpOptions = buildOptions(settings);
 		this.hasAnyCleanUpEnabled = anyCleanUpEnabled(settings);
-		this.cleanUps = CleanUpRegistry.buildAll();
+		this.cleanUps = cleanUps;
 	}
 
 	private final boolean hasAnyCleanUpEnabled;
@@ -71,8 +77,11 @@ public class EclipseJdtCleanUpImpl {
 	 * Returns {@code true} if at least one {@code cleanup.* = true} entry exists in the profile
 	 * (other than the always-disabled {@code cleanup.format_source_code}). Used to short-circuit
 	 * the AST parsing pipeline when the profile is empty/disabled.
+	 *
+	 * <p>Package-private so unit tests can drive every branch directly with assert-on-result
+	 * semantics rather than relying on downstream side effects.
 	 */
-	private static boolean anyCleanUpEnabled(Properties settings) {
+	static boolean anyCleanUpEnabled(Properties settings) {
 		for (String key : settings.stringPropertyNames()) {
 			if (CleanUpConstants.FORMAT_SOURCE_CODE_KEY.equals(key)) {
 				continue;
@@ -85,15 +94,12 @@ public class EclipseJdtCleanUpImpl {
 	}
 
 	/** Materialises the profile properties as an immutable {@link CleanUpOptions} bag. */
-	private static CleanUpOptions buildOptions(Properties settings) {
-		Map<String, String> options = new HashMap<>(settings.size() + 1);
-		// Properties.stringPropertyNames() enforces String typing; bypasses the legacy
-		// Hashtable.put(Object,Object) contract that allows non-String entries.
+	static CleanUpOptions buildOptions(Properties settings) {
+		// Properties.stringPropertyNames() returns only keys whose value is a non-null String;
+		// the legacy Hashtable.put(Object,Object) contract is therefore moot for our purposes.
+		Map<String, String> options = new HashMap<>();
 		for (String key : settings.stringPropertyNames()) {
-			String value = settings.getProperty(key);
-			if (value != null) {
-				options.put(key, value);
-			}
+			options.put(key, settings.getProperty(key));
 		}
 		// Always disable Eclipse's internal formatter — Spotless owns formatting.
 		options.put(CleanUpConstants.FORMAT_SOURCE_CODE_KEY, CleanUpOptions.FALSE);
@@ -120,8 +126,14 @@ public class EclipseJdtCleanUpImpl {
 		if (!hasAnyCleanUpEnabled || cleanUps.isEmpty()) {
 			return raw;
 		}
-		// Normalise to LF so that JDT's parser-emitted offsets line up with our in-memory Document.
-		String current = raw.indexOf('\r') >= 0 ? raw.replace("\r\n", "\n").replace("\r", "\n") : raw;
+		// Lazy bootstrap: only fire OSGi runtime when we actually have cleanups to apply. Keeping
+		// this out of the static initialiser lets unit tests verify the short-circuit paths
+		// without spinning up Solstice.
+		SolsticeBootstrap.ensureBootstrapped();
+		// Normalise to LF so that JDT's parser-emitted offsets line up with our in-memory
+		// Document. The replace calls are no-ops on input without CR, so we skip the redundant
+		// short-circuit guard that PIT flagged as an equivalent mutant.
+		String current = raw.replace("\r\n", "\n").replace("\r", "\n");
 		for (ICleanUp cleanUp : cleanUps) {
 			if (!configure(cleanUp)) {
 				continue;

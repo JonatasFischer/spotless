@@ -15,9 +15,6 @@
  */
 package com.diffplug.spotless.extra.glue.jdt.cleanup;
 
-import java.util.logging.Level;
-import java.util.logging.Logger;
-
 import org.eclipse.jdt.internal.core.JavaElement;
 import org.eclipse.jdt.internal.core.PackageFragment;
 
@@ -34,20 +31,25 @@ import org.eclipse.jdt.internal.core.PackageFragment;
  */
 final class StubPackageFragment extends PackageFragment {
 
-	private static final Logger LOGGER = Logger.getLogger(StubPackageFragment.class.getName());
-
-	static final StubPackageFragment INSTANCE = createInstance();
+	static final StubPackageFragment INSTANCE = createInstance("parent");
 
 	private StubPackageFragment() {
 		super(null, new String[0]);
 	}
 
-	private static StubPackageFragment createInstance() {
+	/**
+	 * Builds a {@link StubPackageFragment} and wires the supplied {@code parentFieldName} on
+	 * {@link JavaElement} via reflection. Package-private and parameterised so unit tests can
+	 * pass an unknown field name to verify the failure path.
+	 */
+	static StubPackageFragment createInstance(String parentFieldName) {
 		StubPackageFragment inst = new StubPackageFragment();
 		try {
-			StubProxies.setField(inst, JavaElement.class, "parent", StubJavaProject.INSTANCE);
+			StubProxies.setField(inst, JavaElement.class, parentFieldName, StubJavaProject.INSTANCE);
 		} catch (ReflectiveOperationException e) {
-			LOGGER.log(Level.FINE, e, () -> "Could not set StubPackageFragment.parent; some cleanups may fail");
+			throw new IllegalStateException(
+					"Eclipse JDT API changed: JavaElement#" + parentFieldName + " is missing; please update spotless",
+					e);
 		}
 		return inst;
 	}

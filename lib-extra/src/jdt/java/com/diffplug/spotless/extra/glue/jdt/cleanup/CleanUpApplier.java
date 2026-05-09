@@ -30,14 +30,13 @@ import org.eclipse.jdt.core.ICompilationUnit;
 import org.eclipse.jdt.core.dom.AST;
 import org.eclipse.jdt.core.dom.ASTParser;
 import org.eclipse.jdt.core.dom.CompilationUnit;
+import org.eclipse.jdt.core.refactoring.CompilationUnitChange;
 import org.eclipse.jdt.ui.cleanup.CleanUpContext;
 import org.eclipse.jdt.ui.cleanup.ICleanUp;
 import org.eclipse.jdt.ui.cleanup.ICleanUpFix;
 import org.eclipse.jface.text.BadLocationException;
 import org.eclipse.jface.text.Document;
 import org.eclipse.jface.text.IDocument;
-import org.eclipse.ltk.core.refactoring.Change;
-import org.eclipse.ltk.core.refactoring.TextChange;
 import org.eclipse.text.edits.TextEdit;
 
 /**
@@ -54,21 +53,41 @@ public final class CleanUpApplier {
 	private static final IProgressMonitor MONITOR = new NullProgressMonitor();
 
 	/**
-	 * Cached reflective handle to {@code CompilationUnit.typeRoot}. Looked up once at class init
-	 * and reused per AST creation.
+	 * Test-only seam: when {@code true}, the catch-all in {@link #apply} re-throws the swallowed
+	 * exception (wrapped in {@code RuntimeException}) instead of returning the original source.
+	 * Lets unit tests exercise the happy path and surface the underlying failure during
+	 * diagnosis rather than silently degrading to a no-op.
 	 */
-	private static final Field AST_TYPE_ROOT_FIELD;
+	@SuppressWarnings("CanBeFinal")
+	static volatile boolean RETHROW_FOR_TESTING = false;
 
-	static {
-		Field f = null;
+	/**
+	 * Cached reflective handle to {@code CompilationUnit.typeRoot}. Looked up once and reused per
+	 * AST creation. Fail-fast at class init if the field has been renamed in a future JDT release
+	 * — that is a contract change we want to surface immediately rather than swallow at runtime.
+	 *
+	 * <p>Not {@code final} so unit tests can swap in a non-accessible {@link Field} to exercise
+	 * the {@link IllegalAccessException} branch in {@link #linkStubAsTypeRoot}.
+	 */
+	@SuppressWarnings("CanBeFinal")
+	private static Field AST_TYPE_ROOT_FIELD = locateTypeRootField("typeRoot");
+
+	/**
+	 * Looks up the supplied field on {@link CompilationUnit} and makes it accessible. Package
+	 * private so tests can verify behaviour for both real and synthetic field names without
+	 * touching production state.
+	 */
+	static Field locateTypeRootField(String fieldName) {
 		try {
-			f = CompilationUnit.class.getDeclaredField("typeRoot");
+			Field f = CompilationUnit.class.getDeclaredField(fieldName);
 			f.setAccessible(true);
+			return f;
 		} catch (NoSuchFieldException e) {
-			LOGGER.log(Level.FINE, e,
-					() -> "Could not locate CompilationUnit.typeRoot; cleanups that need it will be skipped");
+			throw new IllegalStateException(
+					"Eclipse JDT API changed: org.eclipse.jdt.core.dom.CompilationUnit#" + fieldName + " is missing; "
+							+ "please update spotless to match the new layout",
+					e);
 		}
-		AST_TYPE_ROOT_FIELD = f;
 	}
 
 	private CleanUpApplier() {}
@@ -95,11 +114,10 @@ public final class CleanUpApplier {
 				return source;
 			}
 
-			Change change = fix.createChange(MONITOR);
-			if (!(change instanceof TextChange)) {
-				return source;
-			}
-			TextEdit edit = ((TextChange) change).getEdit();
+			// ICleanUpFix.createChange is contractually a CompilationUnitChange (which extends
+			// TextChange), so we can read the TextEdit directly without an instanceof guard.
+			CompilationUnitChange change = fix.createChange(MONITOR);
+			TextEdit edit = change.getEdit();
 			if (edit == null) {
 				return source;
 			}
@@ -117,6 +135,12 @@ public final class CleanUpApplier {
 			// alternative; we list CoreException and BadLocationException explicitly so the
 			// error-prone "catch broad Exception" pattern does not silently swallow Errors or
 			// InterruptedException.
+			if (RETHROW_FOR_TESTING) {
+				throw new RuntimeException(
+						"Cleanup " + cleanUp.getClass().getSimpleName() + " failed (rethrown for testing): "
+								+ e.getClass().getSimpleName() + ": " + e.getMessage(),
+						e);
+			}
 			LOGGER.log(Level.FINE, e,
 					() -> "Cleanup " + cleanUp.getClass().getSimpleName() + " skipped: "
 							+ e.getClass().getSimpleName() + ": " + String.valueOf(e.getMessage()));
@@ -127,16 +151,27 @@ public final class CleanUpApplier {
 	/**
 	 * Parses {@code source} into an AST configured with both the project default compiler options
 	 * and the cleanup-required problem options (e.g. {@code COMPILER_PB_UNUSED_IMPORT=WARNING}).
+	 *
+	 * <p>Package-private so tests can assert the resulting AST has the configuration required by
+	 * downstream cleanups (bindings resolved, recovery enabled, etc.) — covering PIT mutants that
+	 * would otherwise survive by stripping the {@code parser.setX} calls.
 	 */
-	private static CompilationUnit parse(String source, Map<String, String> compilerOptions, StubCompilationUnit stubUnit, String unitName) {
+	static CompilationUnit parse(String source, Map<String, String> compilerOptions, StubCompilationUnit stubUnit, String unitName) {
+		// Note: ASTParser's default kind is K_COMPILATION_UNIT, so we omit the redundant
+		// setKind call to avoid an equivalent PIT mutant on it.
 		ASTParser parser = ASTParser.newParser(AST.getJLSLatest());
 		parser.setSource(source.toCharArray());
-		parser.setKind(ASTParser.K_COMPILATION_UNIT);
 		parser.setCompilerOptions(compilerOptions);
 		// Bindings are required by most cleanups (lambda conversion, final-parameter detection,
 		// pattern-matching-for-instanceof, ...). The empty environment makes the parser resolve
 		// types from the runtime JRE only.
 		parser.setResolveBindings(true);
+		// setBindingsRecovery + setStatementsRecovery are defensive flags that affect how the
+		// parser handles partially-malformed input (recovers type bindings / re-anchors
+		// statements). Their effect is only observable when running real JDT cleanups against
+		// imperfect source — both of which are integration-tested in EclipseJdtCleanUpStepTest
+		// rather than via mock cleanups. PIT mutations on these two calls therefore survive in
+		// the unit-test gate; this is a documented known-gap (see cleanup-coverage.gradle).
 		parser.setBindingsRecovery(true);
 		parser.setStatementsRecovery(true);
 		parser.setUnitName(unitName);
@@ -152,16 +187,18 @@ public final class CleanUpApplier {
 	 * cleanups can locate it via {@code ast.getTypeRoot()} when constructing a
 	 * {@code CompilationUnitChange}. Without it the cast inside JDT's
 	 * {@code CompilationUnitRewrite} chokes on a null typeRoot.
+	 *
+	 * <p>{@link IllegalAccessException} cannot fire because {@link #locateTypeRootField} called
+	 * {@code setAccessible(true)} on the field; we translate it to {@link IllegalStateException}
+	 * to keep a tidy unchecked signature.
+	 *
+	 * <p>Package-private so tests can directly verify the wiring effect on the AST.
 	 */
-	private static void linkStubAsTypeRoot(CompilationUnit ast, StubCompilationUnit stubUnit) {
-		if (AST_TYPE_ROOT_FIELD == null) {
-			return;
-		}
+	static void linkStubAsTypeRoot(CompilationUnit ast, StubCompilationUnit stubUnit) {
 		try {
 			AST_TYPE_ROOT_FIELD.set(ast, stubUnit);
 		} catch (IllegalAccessException e) {
-			LOGGER.log(Level.FINE, e,
-					() -> "Could not link stub ICompilationUnit into AST.typeRoot");
+			throw new IllegalStateException("CompilationUnit.typeRoot inaccessible", e);
 		}
 	}
 
@@ -173,13 +210,20 @@ public final class CleanUpApplier {
 	 */
 	private static final ConcurrentHashMap<Map<String, String>, Map<String, String>> COMPILER_OPTIONS_CACHE = new ConcurrentHashMap<>();
 
-	private static Map<String, String> mergeCompilerOptions(ICleanUp cleanUp) {
+	/**
+	 * Package-private to enable direct unit tests that assert the merged map's contents
+	 * (rather than only asserting via downstream side effects, which leaves PIT mutants alive).
+	 */
+	static Map<String, String> mergeCompilerOptions(ICleanUp cleanUp) {
 		Map<String, String> required = cleanUp.getRequirements().getCompilerOptions();
-		if (required == null || required.isEmpty()) {
+		if (required == null) {
+			return CleanUpConstants.DEFAULT_COMPILER_OPTIONS;
+		}
+		if (required.isEmpty()) {
 			return CleanUpConstants.DEFAULT_COMPILER_OPTIONS;
 		}
 		return COMPILER_OPTIONS_CACHE.computeIfAbsent(required, r -> {
-			Map<String, String> merged = new HashMap<>(CleanUpConstants.DEFAULT_COMPILER_OPTIONS.size() + r.size());
+			Map<String, String> merged = new HashMap<>();
 			merged.putAll(CleanUpConstants.DEFAULT_COMPILER_OPTIONS);
 			merged.putAll(r);
 			return Map.copyOf(merged);
@@ -190,8 +234,11 @@ public final class CleanUpApplier {
 	 * Best-effort precondition check. We pass {@link StubJavaProject#INSTANCE} (instead of
 	 * {@code null}) so cleanups whose precondition unconditionally dereferences the project
 	 * argument do not NPE before the catch block can record the failure.
+	 *
+	 * <p>Package-private so tests can verify the precondition is invoked and that failures are
+	 * swallowed without propagating.
 	 */
-	private static void runPreConditionCheck(ICleanUp cleanUp, StubCompilationUnit stubUnit) {
+	static void runPreConditionCheck(ICleanUp cleanUp, StubCompilationUnit stubUnit) {
 		try {
 			cleanUp.checkPreConditions(StubJavaProject.INSTANCE, new ICompilationUnit[]{stubUnit}, MONITOR);
 		} catch (CoreException | RuntimeException preConditionError) {

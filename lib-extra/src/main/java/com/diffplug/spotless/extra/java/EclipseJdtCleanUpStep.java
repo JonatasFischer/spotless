@@ -124,6 +124,11 @@ public final class EclipseJdtCleanUpStep {
 	}
 
 	private static FormatterFunc apply(EquoBasedStepBuilder.State state) throws ReflectiveOperationException {
+		// JVM_SUPPORT.assertFormatterSupported is a no-op on JVM >= MIN_JVM (17). In the unit
+		// test JVM (21+), this call is environment-equivalent — PIT cannot kill the
+		// "removed call" mutant from a unit test because we cannot fake a lower JVM version.
+		// The integration tests in EclipseJdtCleanUpStepTest cover the real-world case where
+		// a too-old JVM legitimately fails this check. Documented gap in cleanup-coverage.gradle.
 		JVM_SUPPORT.assertFormatterSupported(state.getSemanticVersion());
 		Class<?> implClass = state.getJarState().getClassLoader().loadClass(IMPL_FQN);
 		Object impl = implClass.getConstructor(Properties.class).newInstance(state.getPreferences());

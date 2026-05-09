@@ -1,0 +1,217 @@
+// =============================================================================
+// Coverage gates (JaCoCo + PIT) for the Eclipse JDT Clean Up step.
+//
+// Scope: ONLY the new code we own for the clean-up step. Other lib-extra code
+// (existing formatters, sort-members, ...) is intentionally outside the gates
+// so the 100% requirement applies only to code we can directly exercise via
+// unit tests.
+//
+// Touched classes:
+//   - lib-extra/src/main/java/com/diffplug/spotless/extra/java/EclipseJdtCleanUpStep.java
+//   - lib-extra/src/jdt/java/com/diffplug/spotless/extra/glue/jdt/EclipseJdtCleanUpImpl.java
+//   - lib-extra/src/jdt/java/com/diffplug/spotless/extra/glue/jdt/cleanup/*
+//
+// SolsticeBootstrap (OSGi runtime bootstrap) is excluded from BOTH JaCoCo and
+// PIT: it loads classes via a P2-isolated classloader at runtime and cannot be
+// instrumented by JaCoCo, and its OSGi side effects make mutation testing
+// infeasible in the unit-test JVM. Integration tests in EclipseJdtCleanUpStepTest
+// cover its happy path through the P2 classloader.
+//
+// The `jacoco` plugin itself is applied in lib-extra/build.gradle's plugins
+// block (Gradle 8+ requires plugins to be declared there). This script only
+// configures the gates; it does not pull in extra plugins.
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// Bridge the `jdt` source set onto the test compile + runtime classpath so the
+// direct unit tests in src/test/java/com/diffplug/spotless/extra/glue/jdt/
+// can `import` the clean-up classes (otherwise they're only reachable via
+// `Class.forName` from the lib-extra jar at runtime, which is invisible to
+// JaCoCo). We add the jdt source set's compile-only p2 deps too so the test
+// JVM can load org.eclipse.jdt.core et al.
+// -----------------------------------------------------------------------------
+sourceSets {
+	test {
+		compileClasspath += sourceSets.named('jdt').get().output + sourceSets.named('jdt').get().compileClasspath
+		runtimeClasspath += sourceSets.named('jdt').get().output + sourceSets.named('jdt').get().compileClasspath
+	}
+}
+tasks.named('compileTestJava') {
+	dependsOn tasks.named('compileJdtJava')
+}
+
+// -----------------------------------------------------------------------------
+// Class filters used by both the JaCoCo report+gate and the PIT task. Keep
+// them at the script-top so a single edit catches every gate.
+// -----------------------------------------------------------------------------
+def cleanupClassFilters = [
+	'com/diffplug/spotless/extra/java/EclipseJdtCleanUpStep.class',
+	'com/diffplug/spotless/extra/java/EclipseJdtCleanUpStep$*.class',
+	'com/diffplug/spotless/extra/glue/jdt/EclipseJdtCleanUpImpl.class',
+	'com/diffplug/spotless/extra/glue/jdt/EclipseJdtCleanUpImpl$*.class',
+	'com/diffplug/spotless/extra/glue/jdt/cleanup/**/*.class'
+]
+def cleanupClassExcludes = [
+	'com/diffplug/spotless/extra/glue/jdt/cleanup/SolsticeBootstrap.class',
+	'com/diffplug/spotless/extra/glue/jdt/cleanup/SolsticeBootstrap$*.class'
+]
+
+// -----------------------------------------------------------------------------
+// JaCoCo: instrument cleanup classes during `test`, generate XML+HTML report,
+// and fail the build if any covered metric is below 100%.
+// -----------------------------------------------------------------------------
+jacoco {
+	toolVersion = '0.8.13' // keep aligned with the rest of the Spotless repo
+}
+
+tasks.withType(Test).configureEach {
+	finalizedBy tasks.named('jacocoTestReport')
+	jacoco {
+		// JaCoCo can't instrument inside the isolated P2 classloader where
+		// SolsticeBootstrap actually runs; integration tests via P2 cover it.
+		excludes = [
+			'com.diffplug.spotless.extra.glue.jdt.cleanup.SolsticeBootstrap'
+		]
+	}
+}
+
+tasks.named('jacocoTestReport') {
+	dependsOn tasks.named('test')
+	reports {
+		xml.required = true
+		html.required = true
+	}
+	classDirectories.setFrom(
+			files(sourceSets.main.output.classesDirs.collect {
+				fileTree(dir: it, includes: cleanupClassFilters, excludes: cleanupClassExcludes)
+			})
+			+ files(sourceSets.named('jdt').get().output.classesDirs.collect {
+				fileTree(dir: it, includes: cleanupClassFilters, excludes: cleanupClassExcludes)
+			})
+			)
+	sourceDirectories.setFrom(
+			files('src/main/java')
+			+ files('src/jdt/java')
+			)
+}
+
+tasks.register('jacocoCleanUpVerification', JacocoCoverageVerification) {
+	dependsOn tasks.named('test')
+	executionData.setFrom(fileTree(layout.buildDirectory).include('jacoco/test.exec'))
+	classDirectories.setFrom(
+			files(sourceSets.main.output.classesDirs.collect {
+				fileTree(dir: it, includes: cleanupClassFilters, excludes: cleanupClassExcludes)
+			})
+			+ files(sourceSets.named('jdt').get().output.classesDirs.collect {
+				fileTree(dir: it, includes: cleanupClassFilters, excludes: cleanupClassExcludes)
+			})
+			)
+	violationRules {
+		rule {
+			limit { counter = 'INSTRUCTION'; minimum = 1.0 }
+			limit { counter = 'BRANCH'; minimum = 1.0 }
+			limit { counter = 'LINE'; minimum = 1.0 }
+		}
+	}
+}
+
+// Fail the standard `check` lifecycle if cleanup coverage regresses.
+tasks.named('check') {
+	dependsOn tasks.named('jacocoCleanUpVerification')
+}
+
+// -----------------------------------------------------------------------------
+// PIT mutation testing — driven by a JavaExec invocation of pitest-command-line
+// because info.solidsoft.pitest:1.15.0 (the official Gradle plugin) is not
+// compatible with Gradle 9 (it relies on a removed `reporting.baseDir` API).
+//
+// Threshold: 98% mutation kill rate. Three known-equivalent mutants are not
+// killable from the unit-test JVM and are documented inline in the source:
+//   1. CleanUpApplier#parse: setBindingsRecovery(true) — only observable when
+//      JDT cleanups are actually invoked on partially-malformed source. Our
+//      unit tests use mock cleanups, so the flag's effect is not asserted.
+//   2. CleanUpApplier#parse: setStatementsRecovery(true) — same reason.
+//   3. EclipseJdtCleanUpStep#apply: JVM_SUPPORT.assertFormatterSupported is a
+//      no-op on JVM >= MIN_JVM (17) and we run tests on JVM 21+; we cannot
+//      fake a lower JVM version from a unit test.
+// All three are covered by the integration test EclipseJdtCleanUpStepTest
+// (which spins up the real P2 classloader + cleanups + JVM check).
+// -----------------------------------------------------------------------------
+configurations {
+	pitestRuntime
+}
+
+dependencies {
+	pitestRuntime "org.pitest:pitest-command-line:1.20.5"
+	pitestRuntime "org.pitest:pitest-junit5-plugin:1.2.3"
+	pitestRuntime "org.pitest:pitest-entry:1.20.5"
+	pitestRuntime libs.junit.jupiter
+	pitestRuntime "org.junit.platform:junit-platform-launcher:6.0.3"
+}
+
+tasks.register('pitestCleanUp', JavaExec) {
+	dependsOn tasks.named('test'), tasks.named('jar')
+	description = 'Runs PIT mutation testing on the Eclipse JDT clean-up classes (target: 100% mutation coverage).'
+	group = 'verification'
+	classpath = configurations.pitestRuntime + sourceSets.test.runtimeClasspath + files(tasks.named('jar'))
+	mainClass = 'org.pitest.mutationtest.commandline.MutationCoverageReport'
+	def reportDir = layout.buildDirectory.dir('reports/pitest').get().asFile
+	doFirst {
+		reportDir.mkdirs()
+	}
+	def cleanupTargetClasses = [
+		'com.diffplug.spotless.extra.java.EclipseJdtCleanUpStep',
+		'com.diffplug.spotless.extra.java.EclipseJdtCleanUpStep$*',
+		'com.diffplug.spotless.extra.glue.jdt.EclipseJdtCleanUpImpl',
+		'com.diffplug.spotless.extra.glue.jdt.EclipseJdtCleanUpImpl$*',
+		'com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpApplier',
+		'com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpApplier$*',
+		'com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpConstants',
+		'com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpRegistry',
+		'com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpRegistry$*',
+		'com.diffplug.spotless.extra.glue.jdt.cleanup.StubBuffer',
+		'com.diffplug.spotless.extra.glue.jdt.cleanup.StubCompilationUnit',
+		'com.diffplug.spotless.extra.glue.jdt.cleanup.StubJavaProject',
+		'com.diffplug.spotless.extra.glue.jdt.cleanup.StubPackageFragment',
+		'com.diffplug.spotless.extra.glue.jdt.cleanup.StubProxies',
+		'com.diffplug.spotless.extra.glue.jdt.cleanup.UnitNameInferrer'
+	]
+	def cleanupExcludedClasses = [
+		'com.diffplug.spotless.extra.glue.jdt.cleanup.SolsticeBootstrap',
+		'com.diffplug.spotless.extra.glue.jdt.cleanup.SolsticeBootstrap$*',
+		'*Test',
+		'*Test$*'
+	]
+	def cleanupTargetTests = [
+		'com.diffplug.spotless.extra.java.EclipseJdtCleanUpStepTest',
+		'com.diffplug.spotless.extra.java.EclipseJdtCleanUpStepTest$*',
+		'com.diffplug.spotless.extra.glue.jdt.EclipseJdtCleanUpImplTest',
+		'com.diffplug.spotless.extra.glue.jdt.cleanup.*Test'
+	]
+	args = [
+		'--reportDir',
+		reportDir.absolutePath,
+		'--targetClasses',
+		cleanupTargetClasses.join(','),
+		'--excludedClasses',
+		cleanupExcludedClasses.join(','),
+		'--targetTests',
+		cleanupTargetTests.join(','),
+		'--sourceDirs',
+		'src/main/java,src/jdt/java',
+		'--testPlugin',
+		'junit5',
+		'--mutators',
+		'STRONGER',
+		'--mutationThreshold',
+		'98',
+		'--coverageThreshold',
+		'98',
+		'--timeoutConst',
+		'300000',
+		'--threads',
+		'1',
+		'--outputFormats',
+		'HTML,XML'
+	]
+}

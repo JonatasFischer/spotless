@@ -17,7 +17,6 @@ package com.diffplug.spotless.extra.glue.jdt.cleanup;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
-import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.Map;
 
@@ -122,11 +121,5 @@ final class StubProxies {
 		Field f = declaringClass.getDeclaredField(fieldName);
 		f.setAccessible(true);
 		f.set(target, value);
-	}
-
-	/** Tiny helper kept here so callers do not have to import {@code Method} just to read the name. */
-	@SuppressWarnings("unused")
-	static String methodKey(Method m) {
-		return m.getName();
 	}
 }

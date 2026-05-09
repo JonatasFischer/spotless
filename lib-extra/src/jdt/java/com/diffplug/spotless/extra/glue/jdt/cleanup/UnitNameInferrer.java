@@ -15,6 +15,7 @@
  */
 package com.diffplug.spotless.extra.glue.jdt.cleanup;
 
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -41,14 +42,14 @@ final class UnitNameInferrer {
 	private UnitNameInferrer() {}
 
 	/**
+	 * @param source non-null source code; pass an empty string for "no source available"
 	 * @return the inferred unit name (e.g. {@code "Foo.java"}) or
-	 *         {@link CleanUpConstants#DEFAULT_UNIT_NAME} when {@code source} is null/blank or no
-	 *         public type declaration is found.
+	 *         {@link CleanUpConstants#DEFAULT_UNIT_NAME} when no public type declaration is found
+	 *         (which includes blank input — the regex never matches a blank string).
+	 * @throws NullPointerException if {@code source} is null — callers must validate the input
 	 */
 	static String infer(String source) {
-		if (source == null || source.isBlank()) {
-			return CleanUpConstants.DEFAULT_UNIT_NAME;
-		}
+		Objects.requireNonNull(source, "source");
 		Matcher m = PUBLIC_TYPE_PATTERN.matcher(source);
 		if (m.find()) {
 			return m.group(1) + ".java";
