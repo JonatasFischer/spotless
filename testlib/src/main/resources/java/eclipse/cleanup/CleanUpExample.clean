@@ -15,14 +15,7 @@ public class CleanUpExample {
 		return result;
 	}
 
-	public int countOver(final int threshold) {
-		int count = 0;
-		final int[] values = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
-		for (final int v : values) {
-			if (v > threshold) {
-				count++;
-			}
-		}
-		return count;
+	public Runnable lambdaExample() {
+		return () -> System.out.println("hello");
 	}
 }

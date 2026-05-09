@@ -16,8 +16,11 @@
 package com.diffplug.spotless.extra.glue.jdt;
 
 import java.io.File;
+import java.io.IOException;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -25,6 +28,8 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IProject;
@@ -66,7 +71,14 @@ import org.eclipse.jdt.ui.cleanup.ICleanUpFix;
 import org.eclipse.jface.text.Document;
 import org.eclipse.jface.text.IDocument;
 import org.eclipse.ltk.core.refactoring.TextChange;
+import org.eclipse.osgi.internal.location.EquinoxLocations;
 import org.eclipse.text.edits.TextEdit;
+import org.osgi.framework.Constants;
+
+import dev.equo.solstice.NestedJars;
+import dev.equo.solstice.ShimIdeBootstrapServices;
+import dev.equo.solstice.Solstice;
+import dev.equo.solstice.p2.CacheLocations;
 
 /**
  * Applies Eclipse JDT Clean Up actions to Java source code.
@@ -85,13 +97,63 @@ public class EclipseJdtCleanUpImpl {
 
 	private static final Logger LOGGER = Logger.getLogger(EclipseJdtCleanUpImpl.class.getName());
 
+	/** Matches the first {@code public class|interface|record|enum Foo} declaration. */
+	private static final Pattern PUBLIC_TYPE_PATTERN = Pattern.compile(
+			"public\\s+(?:abstract\\s+|final\\s+|sealed\\s+|non-sealed\\s+|static\\s+)*(?:class|interface|enum|record)\\s+(\\w+)");
+
+	/**
+	 * Returns the unit name (e.g. {@code "Foo.java"}) that the AST parser should use, derived from
+	 * the first public type declaration in the source. Falls back to a generic name when no public
+	 * type is found. The compiler complains with {@code "The public type X must be defined in its
+	 * own file"} if the unit name does not match the public type, and that single error blocks the
+	 * detection of every other problem (including {@code IProblem.UnusedImport}), so picking the
+	 * right name is essential for cleanups like {@code remove_unused_imports} to fire.
+	 */
+	private static String inferUnitName(String source) {
+		Matcher m = PUBLIC_TYPE_PATTERN.matcher(source);
+		if (m.find()) {
+			return m.group(1) + ".java";
+		}
+		return "CleanUpUnit.java";
+	}
+
 	static {
-		// JavaManipulationPlugin.start() (the OSGi bundle activator) is normally responsible for
-		// setting JavaManipulation.fgPreferenceNodeId. We are not running inside an OSGi runtime
-		// proper, so the field stays null and ProjectScope.getNode(null) throws
-		// IllegalArgumentException whenever a cleanup tries to look up a project preference (e.g.
-		// LambdaExpressionsCleanUpCore -> CodeStyleConfiguration.createImportRewrite). Initialise
-		// it manually via reflection so cleanups fall back to default preferences.
+		// Bootstrap the Equo Solstice OSGi runtime so that bundle activators run and services like
+		// IPreferencesService, JavaModelManager, etc. are registered. This unlocks the cleanups
+		// that depend on ImportRewrite / Platform.getPreferencesService() (lambda conversion,
+		// remove unused imports, missing override annotations, ...).
+		//
+		// This static block mirrors the proven pattern from
+		// com.diffplug.spotless.extra.glue.groovy.GrEclipseFormatterStepImpl. The dev.equo.ide:solstice
+		// dependency is already on the classpath because P2Provisioner adds it to every Equo-based
+		// step.
+		NestedJars.setToWarnOnly();
+		NestedJars.onClassPath().confirmAllNestedJarsArePresentOnClasspath(CacheLocations.p2nestedJars());
+		try {
+			Solstice solstice = Solstice.findBundlesOnClasspath();
+			solstice.warnAndModifyManifestsToFix();
+			Map<String, String> props = Map.of(
+					"osgi.nl", "en_US",
+					Constants.FRAMEWORK_STORAGE_CLEAN, Constants.FRAMEWORK_STORAGE_CLEAN_ONFIRSTINIT,
+					EquinoxLocations.PROP_INSTANCE_AREA, Files.createTempDirectory("spotless-jdt-cleanup").toAbsolutePath().toString());
+			solstice.openShim(props);
+			ShimIdeBootstrapServices.apply(props, solstice.getContext());
+			// org.apache.felix.scr powers Declarative Services so DS-based bundles activate properly.
+			solstice.start("org.apache.felix.scr");
+			// Activating every non-lazy bundle lets the equinox preferences activator register
+			// IPreferencesService, the JDT activators register JavaModelManager, etc.
+			solstice.startAllWithLazy(false);
+			// Explicitly start the JDT bundles in case any of them was left lazy.
+			solstice.start("org.eclipse.equinox.preferences");
+			solstice.start("org.eclipse.core.runtime");
+			solstice.start("org.eclipse.jdt.core");
+			solstice.start("org.eclipse.jdt.core.manipulation");
+		} catch (IOException e) {
+			throw new RuntimeException("Failed to bootstrap Equo Solstice runtime for Eclipse JDT clean up", e);
+		}
+
+		// Belt and braces: the JavaManipulationPlugin.start() activator should have set
+		// JavaManipulation.fgPreferenceNodeId by now, but if for some reason it did not, force it.
 		try {
 			Class<?> jm = Class.forName("org.eclipse.jdt.core.manipulation.JavaManipulation");
 			Field nodeIdField = jm.getDeclaredField("fgPreferenceNodeId");
@@ -100,7 +162,26 @@ public class EclipseJdtCleanUpImpl {
 				nodeIdField.set(null, "org.eclipse.jdt.core.manipulation");
 			}
 		} catch (ReflectiveOperationException e) {
-			LOGGER.log(Level.FINE, e, () -> "Could not initialise JavaManipulation.fgPreferenceNodeId; cleanups that touch import rewrite may fail");
+			LOGGER.log(Level.FINE, e, () -> "Could not verify JavaManipulation.fgPreferenceNodeId after Solstice bootstrap");
+		}
+
+		// Cleanups that go through CodeStyleConfiguration.configureImportRewrite() read several
+		// JDT-UI preferences (import order, on-demand threshold, ...). The org.eclipse.jdt.ui
+		// bundle is NOT on our classpath (we use the headless org.eclipse.jdt.core.manipulation
+		// only), so the InstanceScope node has no defaults for those keys and a null lookup ends
+		// in NPE inside CodeStyleConfiguration.configureImportRewrite. Seed the same defaults
+		// the Eclipse IDE ships with so the import rewrite path is non-null.
+		try {
+			Class<?> instanceScope = Class.forName("org.eclipse.core.runtime.preferences.InstanceScope");
+			Object scope = instanceScope.getField("INSTANCE").get(null);
+			Object node = instanceScope.getMethod("getNode", String.class).invoke(scope, "org.eclipse.jdt.core.manipulation");
+			Class<?> prefs = Class.forName("org.osgi.service.prefs.Preferences");
+			Method put = prefs.getMethod("put", String.class, String.class);
+			put.invoke(node, "org.eclipse.jdt.ui.importorder", "java;javax;org;com");
+			put.invoke(node, "org.eclipse.jdt.ui.ondemandthreshold", "99");
+			put.invoke(node, "org.eclipse.jdt.ui.staticondemandthreshold", "99");
+		} catch (ReflectiveOperationException e) {
+			LOGGER.log(Level.FINE, e, () -> "Could not seed default JDT-UI import preferences; cleanups using import rewrite may fail");
 		}
 	}
 
@@ -149,6 +230,14 @@ public class EclipseJdtCleanUpImpl {
 			compilerOptions.put(JavaCore.COMPILER_SOURCE, "17");
 			compilerOptions.put(JavaCore.COMPILER_COMPLIANCE, "17");
 			compilerOptions.put(JavaCore.COMPILER_CODEGEN_TARGET_PLATFORM, "17");
+			// Each cleanup advertises which compiler problems must be enabled for it to detect
+			// fixable spots — e.g. UnusedCodeCleanUpCore needs COMPILER_PB_UNUSED_IMPORT=WARNING
+			// so the compiler emits IProblem.UnusedImport markers it can act on. Merge those into
+			// the parser configuration before resolving the AST.
+			Map<String, String> requiredOptions = cleanUp.getRequirements().getCompilerOptions();
+			if (requiredOptions != null) {
+				compilerOptions.putAll(requiredOptions);
+			}
 
 			StubCompilationUnit stubUnit = new StubCompilationUnit(source);
 
@@ -164,7 +253,7 @@ public class EclipseJdtCleanUpImpl {
 			parser.setResolveBindings(true);
 			parser.setBindingsRecovery(true);
 			parser.setStatementsRecovery(true);
-			parser.setUnitName("CleanUpUnit.java");
+			parser.setUnitName(inferUnitName(source));
 			parser.setEnvironment(new String[0], new String[0], new String[0], true);
 
 			org.eclipse.jdt.core.dom.CompilationUnit ast = (org.eclipse.jdt.core.dom.CompilationUnit) parser.createAST(null);
@@ -208,10 +297,8 @@ public class EclipseJdtCleanUpImpl {
 			edit.apply(doc);
 			return doc.get();
 		} catch (Exception e) {
-			// Cleanups that need a real Eclipse workspace (e.g. anything touching the import rewrite,
-			// which requires an initialised PreferencesService) will throw here. We log at FINE so
-			// users can opt in to detailed diagnostics by enabling JUL logging without breaking
-			// builds for unrelated cleanups.
+			// A cleanup that throws is logged at FINE level — users can opt in to detailed
+			// diagnostics via JUL configuration without breaking builds for unrelated cleanups.
 			LOGGER.log(Level.FINE, e, () -> "Cleanup " + cleanUp.getClass().getSimpleName() + " skipped: " + e.getClass().getSimpleName() + ": " + e.getMessage());
 			return source;
 		}

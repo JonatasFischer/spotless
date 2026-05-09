@@ -33,7 +33,7 @@ class EclipseJdtCleanUpStepTest extends ResourceHarness {
 	}
 
 	@Test
-	void cleanUp_makesLocalsAndParametersFinal() {
+	void cleanUp_makeFinal_useLambda_removeUnusedImports() {
 		File configFile = setFile("cleanup.xml").toResource("java/eclipse/cleanup/cleanup.xml");
 		EquoBasedStepBuilder builder = createBuilder();
 		builder.setPreferences(List.of(configFile));

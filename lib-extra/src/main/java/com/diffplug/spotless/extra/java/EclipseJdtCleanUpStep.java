@@ -43,32 +43,14 @@ import dev.equo.solstice.p2.P2Model;
  * }
  * </pre>
  *
- * <h2>Limitations</h2>
+ * <p>The implementation bootstraps a full Equo Solstice OSGi runtime (mirroring the pattern from
+ * {@code GrEclipseFormatterStepImpl}) so every Eclipse JDT clean up action &mdash; including
+ * those that depend on the {@code ImportRewrite} pipeline (lambda conversion, remove unused
+ * imports, ...) &mdash; works the same way as it does inside Eclipse IDE itself.
  *
- * <p>Spotless invokes Eclipse JDT outside of a real OSGi/Workbench runtime. As a result, the
- * subset of clean ups that depend on workspace services &mdash; in particular anything that
- * requires the {@code ImportRewrite} pipeline (which in turn needs an initialised
- * {@code Platform.getPreferencesService()}) &mdash; is silently skipped. The skipped categories
- * include, but are not limited to:
- * <ul>
- *   <li>{@code cleanup.remove_unused_imports}</li>
- *   <li>{@code cleanup.use_lambda} / {@code cleanup.convert_functional_interfaces}</li>
- *   <li>{@code cleanup.add_missing_override_annotations} (when it triggers an import)</li>
- *   <li>cleanups that rewrite type references in a way that adds or removes an import</li>
- * </ul>
- *
- * <p>Cleanups that are purely structural (no import rewrite) work as expected, including:
- * <ul>
- *   <li>{@code cleanup.make_variable_declarations_final} (with the per-kind sub-options)</li>
- *   <li>{@code cleanup.convert_to_switch_expressions}</li>
- *   <li>{@code cleanup.boolean_value_rather_than_comparison}</li>
- *   <li>{@code cleanup.return_expression}</li>
- *   <li>{@code cleanup.one_if_rather_than_duplicate_blocks_that_fall_through}</li>
- *   <li>{@code cleanup.redundant_comparator}</li>
- * </ul>
- *
- * <p>Skipped cleanups are logged at {@link java.util.logging.Level#FINE} so users can opt in to
- * detailed diagnostics by enabling JUL logging.
+ * <p>Cleanups that throw an unexpected exception are logged at {@link java.util.logging.Level#FINE}
+ * and the affected source is left unchanged; users can opt in to detailed diagnostics by enabling
+ * JUL logging.
  *
  * <p>The step intentionally forces {@code cleanup.format_source_code} to {@code false}, since
  * formatting is handled separately by {@link EclipseJdtFormatterStep}.
@@ -117,6 +99,12 @@ public final class EclipseJdtCleanUpStep {
 			model.getInstall().add("org.eclipse.jdt.core");
 			model.getInstall().add("org.eclipse.jdt.core.manipulation");
 			model.getInstall().add("org.eclipse.ltk.core.refactoring");
+			// Required for the Solstice OSGi bootstrap that EclipseJdtCleanUpImpl performs:
+			// without an initialised IPreferencesService and JavaModelManager, cleanups that
+			// touch ImportRewrite (lambda conversion, remove unused imports, ...) silently
+			// fail.
+			model.getInstall().add("org.eclipse.core.runtime");
+			model.getInstall().add("org.eclipse.equinox.preferences");
 			return model;
 		}
 

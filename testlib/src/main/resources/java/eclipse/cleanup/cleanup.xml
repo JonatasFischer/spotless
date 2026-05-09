@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <profiles version="2">
     <profile kind="CleanUpProfile" name="spotless-test" version="2">
+        <!-- Remove unused imports -->
+        <setting id="cleanup.remove_unused_imports" value="true"/>
+
+        <!-- Convert anonymous classes to lambdas (master + variants) -->
+        <setting id="cleanup.convert_functional_interfaces" value="true"/>
+        <setting id="cleanup.use_lambda" value="true"/>
+
         <!-- Add 'final' to local variables and parameters (master + variants) -->
         <setting id="cleanup.make_variable_declarations_final" value="true"/>
         <setting id="cleanup.make_local_variable_final" value="true"/>
