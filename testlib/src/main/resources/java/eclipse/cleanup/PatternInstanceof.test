@@ -1,0 +1,11 @@
+package test;
+
+public class PatternInstanceof {
+	public String describe(Object o) {
+		if (o instanceof String) {
+			String s = (String) o;
+			return s.toUpperCase();
+		}
+		return "";
+	}
+}

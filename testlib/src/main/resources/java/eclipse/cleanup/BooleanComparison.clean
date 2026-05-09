@@ -1,0 +1,13 @@
+package test;
+
+public class BooleanComparison {
+	public boolean check(boolean flag) {
+		if (flag) {
+			return true;
+		}
+		if (!flag) {
+			return false;
+		}
+		return flag;
+	}
+}

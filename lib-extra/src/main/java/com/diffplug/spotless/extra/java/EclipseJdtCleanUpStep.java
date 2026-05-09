@@ -44,9 +44,38 @@ import dev.equo.solstice.p2.P2Model;
  * </pre>
  *
  * <p>The implementation bootstraps a full Equo Solstice OSGi runtime (mirroring the pattern from
- * {@code GrEclipseFormatterStepImpl}) so every Eclipse JDT clean up action &mdash; including
- * those that depend on the {@code ImportRewrite} pipeline (lambda conversion, remove unused
- * imports, ...) &mdash; works the same way as it does inside Eclipse IDE itself.
+ * {@code GrEclipseFormatterStepImpl}) so most Eclipse JDT clean up actions &mdash; including
+ * those that depend on the {@code ImportRewrite} pipeline (remove unused imports, lambda
+ * conversion, ...) &mdash; work the same way as inside Eclipse IDE itself.
+ *
+ * <h2>Verified working cleanups</h2>
+ * <ul>
+ *   <li>{@code cleanup.make_variable_declarations_final} (master + variants
+ *       {@code make_local_variable_final}, {@code make_parameters_final},
+ *       {@code make_private_fields_final})</li>
+ *   <li>{@code cleanup.convert_functional_interfaces} + {@code cleanup.use_lambda}</li>
+ *   <li>{@code cleanup.remove_unused_imports}</li>
+ *   <li>{@code cleanup.remove_unnecessary_casts}</li>
+ *   <li>{@code cleanup.valueof_rather_than_instantiation}</li>
+ *   <li>{@code cleanup.boolean_value_rather_than_comparison}</li>
+ * </ul>
+ *
+ * <h2>Known limitations</h2>
+ *
+ * <p>A few cleanups generate a fix successfully but fail when JDT tries to attach that fix to a
+ * {@code CompilationUnitChange}. The failure happens because
+ * {@code ImportRewriteAnalyzer} walks the {@code PackageFragmentRoot} hierarchy and calls
+ * {@code isArchive() / hashCode()} on it &mdash; we cannot stub that out without a real Eclipse
+ * workspace. The affected cleanups are silently skipped (logged at FINE) and the source is left
+ * unchanged for them:
+ * <ul>
+ *   <li>{@code cleanup.instanceof} (pattern matching for instanceof)</li>
+ *   <li>{@code cleanup.convert_to_switch_expressions}</li>
+ *   <li>{@code cleanup.convert_to_enhanced_for_loop}</li>
+ * </ul>
+ *
+ * <p>Achieving 100% coverage would require either spinning up a real Eclipse workspace on disk
+ * (much heavier startup cost) or running JDT as a subprocess. Track this as a future improvement.
  *
  * <p>Cleanups that throw an unexpected exception are logged at {@link java.util.logging.Level#FINE}
  * and the affected source is left unchanged; users can opt in to detailed diagnostics by enabling

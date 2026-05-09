@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<profiles version="2">
+    <profile kind="CleanUpProfile" name="spotless-test-loop" version="2">
+        <setting id="cleanup.convert_to_enhanced_for_loop" value="true"/>
+        <setting id="cleanup.format_source_code" value="false"/>
+    </profile>
+</profiles>

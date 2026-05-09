@@ -36,18 +36,22 @@ import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.NullProgressMonitor;
+import org.eclipse.core.runtime.preferences.IEclipsePreferences;
 import org.eclipse.jdt.core.IBuffer;
 import org.eclipse.jdt.core.IBufferChangedListener;
 import org.eclipse.jdt.core.ICompilationUnit;
 import org.eclipse.jdt.core.IModuleDescription;
 import org.eclipse.jdt.core.IOpenable;
+import org.eclipse.jdt.core.IPackageFragment;
 import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.core.JavaModelException;
 import org.eclipse.jdt.core.dom.AST;
 import org.eclipse.jdt.core.dom.ASTParser;
 import org.eclipse.jdt.internal.core.CompilationUnit;
 import org.eclipse.jdt.internal.core.DefaultWorkingCopyOwner;
+import org.eclipse.jdt.internal.core.JavaElement;
 import org.eclipse.jdt.internal.core.JavaProject;
+import org.eclipse.jdt.internal.core.PackageFragment;
 import org.eclipse.jdt.internal.ui.fix.BooleanValueRatherThanComparisonCleanUpCore;
 import org.eclipse.jdt.internal.ui.fix.CodeStyleCleanUpCore;
 import org.eclipse.jdt.internal.ui.fix.ConvertLoopCleanUpCore;
@@ -218,7 +222,12 @@ public class EclipseJdtCleanUpImpl {
 
 		CleanUpOptions options = new MapCleanUpOptions(cleanUpOptions);
 		for (ICleanUp cleanUp : cleanUps) {
-			cleanUp.setOptions(options);
+			try {
+				cleanUp.setOptions(options);
+			} catch (Exception e) {
+				LOGGER.log(Level.FINE, e, () -> "Cleanup " + cleanUp.getClass().getSimpleName() + " setOptions failed; skipping");
+				continue;
+			}
 			raw = applyCleanUp(cleanUp, raw);
 		}
 		return raw;
@@ -297,8 +306,10 @@ public class EclipseJdtCleanUpImpl {
 			edit.apply(doc);
 			return doc.get();
 		} catch (Exception e) {
-			// A cleanup that throws is logged at FINE level — users can opt in to detailed
-			// diagnostics via JUL configuration without breaking builds for unrelated cleanups.
+			// A few cleanups (instanceof pattern matching, switch expressions, classic-for-to-each)
+			// reach into Eclipse JDT internals that require a real PackageFragmentRoot/IFile —
+			// neither of which we can stub without spinning up a workspace. Log at FINE so users can
+			// opt-in to detailed diagnostics; the source is left unchanged for that cleanup.
 			LOGGER.log(Level.FINE, e, () -> "Cleanup " + cleanUp.getClass().getSimpleName() + " skipped: " + e.getClass().getSimpleName() + ": " + e.getMessage());
 			return source;
 		}
@@ -603,6 +614,69 @@ public class EclipseJdtCleanUpImpl {
 		public IResource getResource() {
 			return fakeFile;
 		}
+
+		/**
+		 * {@code ImportRewriteAnalyzer} casts {@code cu.getParent()} to {@link IPackageFragment}
+		 * and calls {@code getElementName()} on it to compute implicit import containers. Return a
+		 * stub that pretends the unit lives in the default (unnamed) package — that's the same
+		 * behaviour as Eclipse for files outside any source folder.
+		 */
+		@Override
+		public JavaElement getParent() {
+			return StubPackageFragment.INSTANCE;
+		}
+	}
+
+	/**
+	 * Minimal stub of {@link PackageFragment} representing the default (unnamed) package.
+	 * Required so that {@code ImportRewriteAnalyzer} can compute implicit import containers
+	 * without an Eclipse workspace.
+	 *
+	 * <p>The {@link PackageFragment#PackageFragment(org.eclipse.jdt.internal.core.PackageFragmentRoot, String[])}
+	 * constructor calls {@code internalIsValidPackageName()} which dereferences the parent
+	 * {@code PackageFragmentRoot} resource — null in our stub, so we override that hook to
+	 * unconditionally return {@code true}.
+	 *
+	 * <p>The parent ({@link org.eclipse.jdt.internal.core.PackageFragmentRoot}) is set to
+	 * {@link StubJavaProject#INSTANCE} via reflection so that {@code getParent()} returns a
+	 * non-null value (required when other JDT internals call {@code getParent().hashCode()}).
+	 * Strictly speaking the parent should be a {@code PackageFragmentRoot}, but the cleanups we
+	 * exercise only call {@code hashCode/equals/getElementName} on it, all of which are inherited
+	 * from {@code JavaElement} — using a {@code JavaProject} works for those cases.
+	 */
+	private static class StubPackageFragment extends PackageFragment {
+		static final StubPackageFragment INSTANCE = createInstance();
+
+		StubPackageFragment() {
+			super(null, new String[0]);
+		}
+
+		private static StubPackageFragment createInstance() {
+			StubPackageFragment inst = new StubPackageFragment();
+			try {
+				Field parentField = JavaElement.class.getDeclaredField("parent");
+				parentField.setAccessible(true);
+				parentField.set(inst, StubJavaProject.INSTANCE);
+			} catch (ReflectiveOperationException e) {
+				LOGGER.log(Level.FINE, e, () -> "Could not set StubPackageFragment.parent; some cleanups may fail");
+			}
+			return inst;
+		}
+
+		@Override
+		protected boolean internalIsValidPackageName() {
+			return true;
+		}
+
+		@Override
+		public String getElementName() {
+			return "";
+		}
+
+		@Override
+		public boolean isDefaultPackage() {
+			return true;
+		}
 	}
 
 	/**
@@ -610,11 +684,28 @@ public class EclipseJdtCleanUpImpl {
 	 * with no real workspace or classpath.
 	 */
 	private static class StubJavaProject extends JavaProject {
-		static final StubJavaProject INSTANCE = new StubJavaProject();
+		// Initialise STUB_PROJECT first since createInstance() depends on it.
 		private static final IProject STUB_PROJECT = createStubProject();
+		static final StubJavaProject INSTANCE = createInstance();
 
 		StubJavaProject() {
 			super(null, null);
+		}
+
+		private static StubJavaProject createInstance() {
+			StubJavaProject inst = new StubJavaProject();
+			// JavaProject.hashCode() (final, inherited from JavaElement) goes through
+			// calculateHashCode() which dereferences this.project. Set it via reflection so
+			// downstream JDT internals (BufferManager cache, ImportRewrite, ...) can hash this
+			// project without NPE.
+			try {
+				Field projectField = JavaProject.class.getDeclaredField("project");
+				projectField.setAccessible(true);
+				projectField.set(inst, STUB_PROJECT);
+			} catch (ReflectiveOperationException e) {
+				LOGGER.log(Level.FINE, e, () -> "Could not set StubJavaProject.project; some cleanups may fail");
+			}
+			return inst;
 		}
 
 		/**
@@ -680,6 +771,24 @@ public class EclipseJdtCleanUpImpl {
 		}
 
 		/**
+		 * Several cleanups (PatternMatchingForInstanceof, ConvertLoop, SwitchExpressions, ...)
+		 * check the project source compliance via {@code JavaModelUtil.is16OrHigher(project)} which
+		 * delegates to {@code project.getOption(JavaCore.COMPILER_SOURCE, true)}. Without this
+		 * override the call would fall back to the workbench-wide default (often "1.8"), causing
+		 * those cleanups to silently no-op. Always answer Java 17 so the modern transformations are
+		 * eligible.
+		 */
+		@Override
+		public String getOption(String optionName, boolean inheritJavaCoreOptions) {
+			if (JavaCore.COMPILER_SOURCE.equals(optionName)
+					|| JavaCore.COMPILER_COMPLIANCE.equals(optionName)
+					|| JavaCore.COMPILER_CODEGEN_TARGET_PLATFORM.equals(optionName)) {
+				return "17";
+			}
+			return inheritJavaCoreOptions ? JavaCore.getOption(optionName) : null;
+		}
+
+		/**
 		 * Default impl traverses {@code JavaModelManager.getInfo()} which dereferences a null
 		 * {@code cache} field outside of a real Eclipse runtime. Returning null bypasses module
 		 * resolution entirely (clean-ups don't need module info for our use case).
@@ -697,6 +806,19 @@ public class EclipseJdtCleanUpImpl {
 		@Override
 		public IProject getProject() {
 			return STUB_PROJECT;
+		}
+
+		/**
+		 * The default {@link JavaProject#getEclipsePreferences()} dereferences the protected
+		 * {@code project} field (not {@link #getProject()}), which is null in our stub. That
+		 * triggers an NPE deep inside {@code hasJavaNature(project)} when cleanups like
+		 * {@code PatternMatchingForInstanceofCleanUpCore} look up the Java source compliance.
+		 * Returning null lets the caller fall back to {@code JavaCore.getOption(...)} which uses
+		 * the workbench-wide defaults.
+		 */
+		@Override
+		public IEclipsePreferences getEclipsePreferences() {
+			return null;
 		}
 	}
 }

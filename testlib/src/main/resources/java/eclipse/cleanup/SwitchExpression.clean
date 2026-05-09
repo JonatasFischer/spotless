@@ -1,0 +1,12 @@
+package test;
+
+public class SwitchExpression {
+	public int describe(int day) {
+		int result = switch (day) {
+		case 1 -> 10;
+		case 2 -> 20;
+		default -> 0;
+		};
+		return result;
+	}
+}

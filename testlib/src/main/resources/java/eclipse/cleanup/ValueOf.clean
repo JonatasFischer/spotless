@@ -1,0 +1,11 @@
+package test;
+
+public class ValueOf {
+	public Integer wrap(int v) {
+		return Integer.valueOf(v);
+	}
+
+	public Boolean wrap(boolean b) {
+		return Boolean.valueOf(b);
+	}
+}

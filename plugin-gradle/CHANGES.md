@@ -6,7 +6,7 @@ We adhere to the [keepachangelog](https://keepachangelog.com/en/1.0.0/) format (
 ### Added
 - Add `withIndentStyle` and `withIndentSize` configuration to `tableTestFormatter` for setting the fallback indent when no `.editorconfig` is found. ([#2893](https://github.com/diffplug/spotless/pull/2893))
 - Add `javaparserVersion(...)` to `cleanthat`, allowing users to override the JavaParser version pulled in transitively by Cleanthat. ([#2903](https://github.com/diffplug/spotless/pull/2903))
-- Add `eclipseCleanUp()` step which applies Eclipse JDT Clean Up actions from a profile XML exported via Eclipse IDE (`Preferences -> Java -> Code Style -> Clean Up -> Export`). Bootstraps an Equo Solstice OSGi runtime so all clean ups — including those that go through `ImportRewrite` (lambda conversion, remove unused imports, ...) — work the same way as inside Eclipse IDE.
+- Add `eclipseCleanUp()` step which applies Eclipse JDT Clean Up actions from a profile XML exported via Eclipse IDE (`Preferences -> Java -> Code Style -> Clean Up -> Export`). Bootstraps an Equo Solstice OSGi runtime so most cleanups — including those that go through `ImportRewrite` (lambda conversion, remove unused imports, ...) — work the same way as inside Eclipse IDE. A few cleanups that walk the `PackageFragmentRoot` hierarchy (`cleanup.instanceof`, `cleanup.convert_to_switch_expressions`, `cleanup.convert_to_enhanced_for_loop`) are skipped silently because they need a real Eclipse workspace; see `EclipseJdtCleanUpStep` Javadoc for the exhaustive list.
 ### Fixed
 - Fix `tableTestFormatter` editorconfig cache not honoring `.editorconfig` changes across Gradle daemon runs due to a shared static `EditorConfigProvider`. ([#2893](https://github.com/diffplug/spotless/pull/2893))
 ### Changes
