@@ -18,9 +18,12 @@ package com.diffplug.spotless.extra.glue.jdt.cleanup;
 import java.lang.reflect.Field;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.jdt.core.ICompilationUnit;
@@ -30,6 +33,7 @@ import org.eclipse.jdt.core.dom.CompilationUnit;
 import org.eclipse.jdt.ui.cleanup.CleanUpContext;
 import org.eclipse.jdt.ui.cleanup.ICleanUp;
 import org.eclipse.jdt.ui.cleanup.ICleanUpFix;
+import org.eclipse.jface.text.BadLocationException;
 import org.eclipse.jface.text.Document;
 import org.eclipse.jface.text.IDocument;
 import org.eclipse.ltk.core.refactoring.Change;
@@ -75,10 +79,13 @@ public final class CleanUpApplier {
 	 * {@code source} is returned unchanged.
 	 */
 	public static String apply(ICleanUp cleanUp, String source) {
+		Objects.requireNonNull(cleanUp, "cleanUp");
+		Objects.requireNonNull(source, "source");
+		String unitName = UnitNameInferrer.infer(source);
 		try {
 			Map<String, String> compilerOptions = mergeCompilerOptions(cleanUp);
-			StubCompilationUnit stubUnit = new StubCompilationUnit(source, UnitNameInferrer.infer(source));
-			CompilationUnit ast = parse(source, compilerOptions, stubUnit);
+			StubCompilationUnit stubUnit = new StubCompilationUnit(source, unitName);
+			CompilationUnit ast = parse(source, compilerOptions, stubUnit, unitName);
 
 			CleanUpContext context = new CleanUpContext(stubUnit, ast);
 			runPreConditionCheck(cleanUp, stubUnit);
@@ -100,14 +107,19 @@ public final class CleanUpApplier {
 			IDocument doc = new Document(source);
 			edit.apply(doc);
 			return doc.get();
-		} catch (Exception e) {
+		} catch (CoreException | BadLocationException | RuntimeException e) {
 			// A few cleanups (instanceof pattern matching, switch expressions, classic-for-to-each)
 			// reach into Eclipse JDT internals that require a real PackageFragmentRoot/IFile —
-			// neither of which we can stub without spinning up a workspace. Logged at FINE so users
-			// can opt-in via JUL configuration; the source is left unchanged for that cleanup.
+			// neither of which we can stub without spinning up a workspace. Logged at FINE so
+			// users can opt in via JUL configuration; source is left unchanged for that cleanup.
+			//
+			// Note: MalformedTreeException is a RuntimeException so it is caught by the third
+			// alternative; we list CoreException and BadLocationException explicitly so the
+			// error-prone "catch broad Exception" pattern does not silently swallow Errors or
+			// InterruptedException.
 			LOGGER.log(Level.FINE, e,
 					() -> "Cleanup " + cleanUp.getClass().getSimpleName() + " skipped: "
-							+ e.getClass().getSimpleName() + ": " + e.getMessage());
+							+ e.getClass().getSimpleName() + ": " + String.valueOf(e.getMessage()));
 			return source;
 		}
 	}
@@ -116,7 +128,7 @@ public final class CleanUpApplier {
 	 * Parses {@code source} into an AST configured with both the project default compiler options
 	 * and the cleanup-required problem options (e.g. {@code COMPILER_PB_UNUSED_IMPORT=WARNING}).
 	 */
-	private static CompilationUnit parse(String source, Map<String, String> compilerOptions, StubCompilationUnit stubUnit) {
+	private static CompilationUnit parse(String source, Map<String, String> compilerOptions, StubCompilationUnit stubUnit, String unitName) {
 		ASTParser parser = ASTParser.newParser(AST.getJLSLatest());
 		parser.setSource(source.toCharArray());
 		parser.setKind(ASTParser.K_COMPILATION_UNIT);
@@ -127,10 +139,10 @@ public final class CleanUpApplier {
 		parser.setResolveBindings(true);
 		parser.setBindingsRecovery(true);
 		parser.setStatementsRecovery(true);
-		parser.setUnitName(UnitNameInferrer.infer(source));
+		parser.setUnitName(unitName);
 		parser.setEnvironment(new String[0], new String[0], new String[0], true);
 
-		CompilationUnit ast = (CompilationUnit) parser.createAST(null);
+		CompilationUnit ast = (CompilationUnit) parser.createAST(MONITOR);
 		linkStubAsTypeRoot(ast, stubUnit);
 		return ast;
 	}
@@ -153,25 +165,36 @@ public final class CleanUpApplier {
 		}
 	}
 
+	/**
+	 * Cache merged compiler-option maps keyed by the cleanup's required-options reference. Each
+	 * cleanup's {@code getRequirements().getCompilerOptions()} returns a deterministic snapshot
+	 * (often shared across invocations), so identity-keyed caching avoids the ~15 fresh HashMap
+	 * allocations per source file that the original implementation performed.
+	 */
+	private static final ConcurrentHashMap<Map<String, String>, Map<String, String>> COMPILER_OPTIONS_CACHE = new ConcurrentHashMap<>();
+
 	private static Map<String, String> mergeCompilerOptions(ICleanUp cleanUp) {
 		Map<String, String> required = cleanUp.getRequirements().getCompilerOptions();
 		if (required == null || required.isEmpty()) {
 			return CleanUpConstants.DEFAULT_COMPILER_OPTIONS;
 		}
-		Map<String, String> merged = new HashMap<>(CleanUpConstants.DEFAULT_COMPILER_OPTIONS);
-		merged.putAll(required);
-		return merged;
+		return COMPILER_OPTIONS_CACHE.computeIfAbsent(required, r -> {
+			Map<String, String> merged = new HashMap<>(CleanUpConstants.DEFAULT_COMPILER_OPTIONS.size() + r.size());
+			merged.putAll(CleanUpConstants.DEFAULT_COMPILER_OPTIONS);
+			merged.putAll(r);
+			return Map.copyOf(merged);
+		});
 	}
 
 	/**
-	 * Best-effort precondition check. The IJavaProject argument is intentionally null because we
-	 * have no real project; cleanups that handle null gracefully (almost all) succeed, the rest
-	 * are caught and logged.
+	 * Best-effort precondition check. We pass {@link StubJavaProject#INSTANCE} (instead of
+	 * {@code null}) so cleanups whose precondition unconditionally dereferences the project
+	 * argument do not NPE before the catch block can record the failure.
 	 */
 	private static void runPreConditionCheck(ICleanUp cleanUp, StubCompilationUnit stubUnit) {
 		try {
-			cleanUp.checkPreConditions(null, new ICompilationUnit[]{stubUnit}, MONITOR);
-		} catch (Exception preConditionError) {
+			cleanUp.checkPreConditions(StubJavaProject.INSTANCE, new ICompilationUnit[]{stubUnit}, MONITOR);
+		} catch (CoreException | RuntimeException preConditionError) {
 			LOGGER.log(Level.FINE, preConditionError,
 					() -> "Cleanup " + cleanUp.getClass().getSimpleName()
 							+ " precondition check failed; continuing anyway");

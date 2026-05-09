@@ -15,6 +15,7 @@
  */
 package com.diffplug.spotless.extra.glue.jdt.cleanup;
 
+import java.util.List;
 import java.util.Map;
 
 import org.eclipse.jdt.core.JavaCore;
@@ -57,6 +58,11 @@ public final class CleanUpConstants {
 
 	// -------------------------------------------------------------------------
 	// OSGi bundle symbolic names referenced by the Solstice bootstrap.
+	//
+	// The same list is duplicated in EclipseJdtCleanUpStep#REQUIRED_BUNDLES (main
+	// source set) because the jdt source set runs inside an isolated P2 classloader
+	// and cannot import classes from main. EclipseJdtCleanUpStepTest has a guard
+	// test that fails the build if the two lists drift.
 	// -------------------------------------------------------------------------
 
 	public static final String BUNDLE_FELIX_SCR = "org.apache.felix.scr";
@@ -64,8 +70,16 @@ public final class CleanUpConstants {
 	public static final String BUNDLE_CORE_RUNTIME = "org.eclipse.core.runtime";
 	public static final String BUNDLE_JDT_CORE = "org.eclipse.jdt.core";
 	public static final String BUNDLE_JDT_CORE_MANIPULATION = "org.eclipse.jdt.core.manipulation";
+	public static final String BUNDLE_LTK_CORE_REFACTORING = "org.eclipse.ltk.core.refactoring";
 
-	// -------------------------------------------------------------------------
+	/** The complete set of bundles started during {@code SolsticeBootstrap.startSolstice}. */
+	public static final List<String> REQUIRED_BUNDLES = List.of(
+			BUNDLE_JDT_CORE,
+			BUNDLE_JDT_CORE_MANIPULATION,
+			BUNDLE_LTK_CORE_REFACTORING,
+			BUNDLE_CORE_RUNTIME,
+			BUNDLE_EQUINOX_PREFERENCES);
+
 	// JDT-UI preference defaults seeded into the InstanceScope so that
 	// CodeStyleConfiguration.configureImportRewrite() does not NPE when looking
 	// up missing keys (the org.eclipse.jdt.ui bundle is intentionally absent).

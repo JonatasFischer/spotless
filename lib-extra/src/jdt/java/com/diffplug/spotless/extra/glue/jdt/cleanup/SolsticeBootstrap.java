@@ -15,11 +15,7 @@
  */
 package com.diffplug.spotless.extra.glue.jdt.cleanup;
 
-import static com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpConstants.BUNDLE_CORE_RUNTIME;
-import static com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpConstants.BUNDLE_EQUINOX_PREFERENCES;
 import static com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpConstants.BUNDLE_FELIX_SCR;
-import static com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpConstants.BUNDLE_JDT_CORE;
-import static com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpConstants.BUNDLE_JDT_CORE_MANIPULATION;
 import static com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpConstants.DEFAULT_IMPORT_ORDER;
 import static com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpConstants.DEFAULT_ONDEMAND_THRESHOLD;
 import static com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpConstants.INSTANCE_AREA_PREFIX;
@@ -27,6 +23,7 @@ import static com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpConstants.PREF
 import static com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpConstants.PREF_KEY_ONDEMAND_THRESHOLD;
 import static com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpConstants.PREF_KEY_STATIC_ONDEMAND_THRESHOLD;
 import static com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpConstants.PREF_NODE_JDT_MANIPULATION;
+import static com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpConstants.REQUIRED_BUNDLES;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
@@ -105,10 +102,11 @@ public final class SolsticeBootstrap {
 		// IPreferencesService and the JDT activators register JavaModelManager etc.
 		solstice.startAllWithLazy(false);
 		// Belt and braces — explicitly request the bundles we depend on in case any was lazy.
-		solstice.start(BUNDLE_EQUINOX_PREFERENCES);
-		solstice.start(BUNDLE_CORE_RUNTIME);
-		solstice.start(BUNDLE_JDT_CORE);
-		solstice.start(BUNDLE_JDT_CORE_MANIPULATION);
+		// Drift between this list and EclipseJdtCleanUpStep#REQUIRED_BUNDLES is guarded by
+		// EclipseJdtCleanUpStepTest#requiredBundlesAreInSync.
+		for (String bundle : REQUIRED_BUNDLES) {
+			solstice.start(bundle);
+		}
 	}
 
 	/**

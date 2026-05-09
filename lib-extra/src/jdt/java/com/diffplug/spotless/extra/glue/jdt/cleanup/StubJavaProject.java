@@ -15,6 +15,7 @@
  */
 package com.diffplug.spotless.extra.glue.jdt.cleanup;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -56,9 +57,20 @@ final class StubJavaProject extends JavaProject {
 		return inst;
 	}
 
+	/**
+	 * Honours {@code inheritJavaCoreOptions} per the {@link JavaProject#getOptions(boolean)}
+	 * contract: when true, merge Spotless-pinned options on top of {@link JavaCore#getOptions()}
+	 * so callers inspecting unrelated keys (e.g. {@code COMPILER_PB_RAW_TYPE_REFERENCE}) get the
+	 * correct workbench default.
+	 */
 	@Override
 	public Map<String, String> getOptions(boolean inheritJavaCoreOptions) {
-		return CleanUpConstants.DEFAULT_COMPILER_OPTIONS;
+		if (!inheritJavaCoreOptions) {
+			return CleanUpConstants.DEFAULT_COMPILER_OPTIONS;
+		}
+		Map<String, String> merged = new HashMap<>(JavaCore.getOptions());
+		merged.putAll(CleanUpConstants.DEFAULT_COMPILER_OPTIONS);
+		return merged;
 	}
 
 	/**

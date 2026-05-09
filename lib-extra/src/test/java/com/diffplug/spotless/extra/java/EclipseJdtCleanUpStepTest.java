@@ -19,6 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.File;
+import java.lang.reflect.Field;
 import java.util.List;
 
 import org.junit.jupiter.api.Disabled;
@@ -136,8 +137,15 @@ class EclipseJdtCleanUpStepTest extends ResourceHarness {
 			EquoBasedStepBuilder builder = createBuilder();
 			builder.setPreferences(List.of(brokenProfile));
 			FormatterStep step = builder.build();
+			// Spotless wraps SAX/parser errors in a runtime exception. Verify the underlying cause
+			// is a parse error (matches "Premature end of file" / "must be well-formed" / similar)
+			// — not just any error containing the substring "XML".
 			assertThatThrownBy(() -> StepHarness.forStep(step).test("class X {}", "class X {}"))
-					.hasMessageContaining("XML");
+					.rootCause()
+					.satisfiesAnyOf(
+							t -> assertThat(t.getMessage()).containsIgnoringCase("xml"),
+							t -> assertThat(t.getClass().getName()).contains("SAXException"),
+							t -> assertThat(t.getClass().getName()).contains("ParseException"));
 		}
 
 		@Test
@@ -147,6 +155,27 @@ class EclipseJdtCleanUpStepTest extends ResourceHarness {
 			FormatterStep b = buildStep(FIXTURES_ROOT + "cleanup.xml");
 			assertThat(a).isEqualTo(b);
 			assertThat(a.hashCode()).isEqualTo(b.hashCode());
+		}
+
+		@Test
+		@DisplayName("EclipseJdtCleanUpStep#REQUIRED_BUNDLES is in sync with the runtime activator list")
+		void requiredBundlesAreInSync() {
+			// Read the runtime activator list reflectively from the jdt source set's
+			// CleanUpConstants. The list must match EclipseJdtCleanUpStep#REQUIRED_BUNDLES
+			// because the two run in different classloaders and cannot share a single constant.
+			List<String> runtimeBundles;
+			try {
+				Class<?> constants = Class.forName("com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpConstants");
+				Field field = constants.getField("REQUIRED_BUNDLES");
+				@SuppressWarnings("unchecked")
+				List<String> bundles = (List<String>) field.get(null);
+				runtimeBundles = bundles;
+			} catch (ReflectiveOperationException e) {
+				throw new AssertionError("Could not load CleanUpConstants from the jdt source set", e);
+			}
+			assertThat(runtimeBundles)
+					.as("CleanUpConstants.REQUIRED_BUNDLES must equal EclipseJdtCleanUpStep.REQUIRED_BUNDLES")
+					.containsExactlyElementsOf(EclipseJdtCleanUpStep.REQUIRED_BUNDLES);
 		}
 	}
 

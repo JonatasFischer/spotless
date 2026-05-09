@@ -19,6 +19,7 @@ import java.io.File;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -58,15 +59,41 @@ public class EclipseJdtCleanUpImpl {
 	private final List<ICleanUp> cleanUps;
 
 	public EclipseJdtCleanUpImpl(Properties settings) {
+		Objects.requireNonNull(settings, "settings");
 		this.cleanUpOptions = buildOptions(settings);
+		this.hasAnyCleanUpEnabled = anyCleanUpEnabled(settings);
 		this.cleanUps = CleanUpRegistry.buildAll();
+	}
+
+	private final boolean hasAnyCleanUpEnabled;
+
+	/**
+	 * Returns {@code true} if at least one {@code cleanup.* = true} entry exists in the profile
+	 * (other than the always-disabled {@code cleanup.format_source_code}). Used to short-circuit
+	 * the AST parsing pipeline when the profile is empty/disabled.
+	 */
+	private static boolean anyCleanUpEnabled(Properties settings) {
+		for (String key : settings.stringPropertyNames()) {
+			if (CleanUpConstants.FORMAT_SOURCE_CODE_KEY.equals(key)) {
+				continue;
+			}
+			if (CleanUpOptions.TRUE.equals(settings.getProperty(key))) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/** Materialises the profile properties as an immutable {@link CleanUpOptions} bag. */
 	private static CleanUpOptions buildOptions(Properties settings) {
 		Map<String, String> options = new HashMap<>(settings.size() + 1);
-		for (Map.Entry<Object, Object> entry : settings.entrySet()) {
-			options.put(String.valueOf(entry.getKey()), String.valueOf(entry.getValue()));
+		// Properties.stringPropertyNames() enforces String typing; bypasses the legacy
+		// Hashtable.put(Object,Object) contract that allows non-String entries.
+		for (String key : settings.stringPropertyNames()) {
+			String value = settings.getProperty(key);
+			if (value != null) {
+				options.put(key, value);
+			}
 		}
 		// Always disable Eclipse's internal formatter — Spotless owns formatting.
 		options.put(CleanUpConstants.FORMAT_SOURCE_CODE_KEY, CleanUpOptions.FALSE);
@@ -76,16 +103,25 @@ public class EclipseJdtCleanUpImpl {
 	/**
 	 * Applies every enabled clean up action to the given Java source string.
 	 *
-	 * @param raw  the raw Java source (LF line endings)
-	 * @param file unused; present for API symmetry with the formatter step
+	 * <p><strong>Threading:</strong> not thread-safe. Each {@link EclipseJdtCleanUpImpl} instance
+	 * owns mutable {@link ICleanUp} instances whose state ({@code setOptions}, fix cache) is
+	 * invalidated across calls. Callers must serialise invocations on the same instance, or
+	 * construct a fresh instance per worker.
+	 *
+	 * @param raw  the raw Java source; line endings are normalised to LF before parsing
+	 * @param file reserved for API symmetry with the formatter step — do not remove (the
+	 *             reflective binding in {@code EclipseJdtCleanUpStep#apply} requires this exact
+	 *             signature). May be {@code null}.
 	 * @return the cleaned-up source, or the original if no clean up produced changes
 	 */
 	@SuppressWarnings("unused")
 	public String cleanUp(String raw, File file) {
-		if (cleanUps.isEmpty()) {
+		Objects.requireNonNull(raw, "raw");
+		if (!hasAnyCleanUpEnabled || cleanUps.isEmpty()) {
 			return raw;
 		}
-		String current = raw;
+		// Normalise to LF so that JDT's parser-emitted offsets line up with our in-memory Document.
+		String current = raw.indexOf('\r') >= 0 ? raw.replace("\r\n", "\n").replace("\r", "\n") : raw;
 		for (ICleanUp cleanUp : cleanUps) {
 			if (!configure(cleanUp)) {
 				continue;
@@ -99,7 +135,7 @@ public class EclipseJdtCleanUpImpl {
 		try {
 			cleanUp.setOptions(cleanUpOptions);
 			return true;
-		} catch (Exception e) {
+		} catch (RuntimeException e) {
 			LOGGER.log(Level.FINE, e,
 					() -> "Cleanup " + cleanUp.getClass().getSimpleName() + " setOptions failed; skipping");
 			return false;

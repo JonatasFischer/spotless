@@ -96,13 +96,19 @@ public final class EclipseJdtCleanUpStep {
 	private static final int MIN_JVM = 17;
 	private static final Jvm.Support<String> JVM_SUPPORT = Jvm.<String> support(NAME).add(MIN_JVM, DEFAULT_VERSION);
 
-	/** Bundles installed via P2 to satisfy the Solstice OSGi bootstrap performed by the impl. */
-	private static final List<String> REQUIRED_BUNDLES = List.of(
+	/**
+	 * The complete set of bundles to install via P2 and start during OSGi bootstrap.
+	 *
+	 * <p><strong>Note:</strong> the runtime activation list lives in
+	 * {@code com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpConstants#REQUIRED_BUNDLES}. The
+	 * two lists are deliberately duplicated because the {@code jdt} source set runs in an isolated
+	 * P2 classloader and cannot see classes from the {@code main} source set. A unit test in
+	 * {@code EclipseJdtCleanUpStepTest#requiredBundlesAreInSync} verifies they stay aligned.
+	 */
+	static final List<String> REQUIRED_BUNDLES = List.of(
 			"org.eclipse.jdt.core",
 			"org.eclipse.jdt.core.manipulation",
 			"org.eclipse.ltk.core.refactoring",
-			// Bootstrapped explicitly in EclipseJdtCleanUpImpl — without these the cleanups that
-			// touch ImportRewrite (lambda conversion, remove unused imports, ...) silently fail.
 			"org.eclipse.core.runtime",
 			"org.eclipse.equinox.preferences");
 
@@ -117,7 +123,7 @@ public final class EclipseJdtCleanUpStep {
 				EclipseJdtCleanUpStep::apply, ImmutableMap.builder());
 	}
 
-	private static FormatterFunc apply(EquoBasedStepBuilder.State state) throws Exception {
+	private static FormatterFunc apply(EquoBasedStepBuilder.State state) throws ReflectiveOperationException {
 		JVM_SUPPORT.assertFormatterSupported(state.getSemanticVersion());
 		Class<?> implClass = state.getJarState().getClassLoader().loadClass(IMPL_FQN);
 		Object impl = implClass.getConstructor(Properties.class).newInstance(state.getPreferences());

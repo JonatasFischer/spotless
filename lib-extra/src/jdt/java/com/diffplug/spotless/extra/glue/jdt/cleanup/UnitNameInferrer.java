@@ -42,9 +42,13 @@ final class UnitNameInferrer {
 
 	/**
 	 * @return the inferred unit name (e.g. {@code "Foo.java"}) or
-	 *         {@link CleanUpConstants#DEFAULT_UNIT_NAME} when no public type is found.
+	 *         {@link CleanUpConstants#DEFAULT_UNIT_NAME} when {@code source} is null/blank or no
+	 *         public type declaration is found.
 	 */
 	static String infer(String source) {
+		if (source == null || source.isBlank()) {
+			return CleanUpConstants.DEFAULT_UNIT_NAME;
+		}
 		Matcher m = PUBLIC_TYPE_PATTERN.matcher(source);
 		if (m.find()) {
 			return m.group(1) + ".java";

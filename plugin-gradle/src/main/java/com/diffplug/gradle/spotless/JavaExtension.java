@@ -408,10 +408,38 @@ public class JavaExtension extends FormatExtension implements HasBuiltinDelimite
 			addStep(builder.build());
 		}
 
-		/** Sets the Eclipse JDT clean-up profile XML file (or files) to apply. */
+		/**
+		 * Sets one or more Eclipse JDT clean-up profile XML files. Later files override earlier
+		 * ones (the underlying merge follows {@code FormatterProperties} semantics).
+		 */
 		public EclipseCleanUpConfig configFile(Object... configFiles) {
 			requireElementsNonNull(configFiles);
+			if (configFiles.length == 0) {
+				throw new IllegalArgumentException("configFile requires at least one file");
+			}
 			builder.setPreferences(getProject().files(configFiles).getFiles());
+			replaceStep(builder.build());
+			return this;
+		}
+
+		/** Inlines a {@code .properties}-formatted clean-up profile (one or more strings, merged). */
+		public EclipseCleanUpConfig configProperties(String... configs) {
+			requireElementsNonNull(configs);
+			if (configs.length == 0) {
+				throw new IllegalArgumentException("configProperties requires at least one entry");
+			}
+			builder.setPropertyPreferences(List.of(configs));
+			replaceStep(builder.build());
+			return this;
+		}
+
+		/** Inlines an XML-formatted clean-up profile (one or more strings, merged). */
+		public EclipseCleanUpConfig configXml(String... configs) {
+			requireElementsNonNull(configs);
+			if (configs.length == 0) {
+				throw new IllegalArgumentException("configXml requires at least one entry");
+			}
+			builder.setXmlPreferences(List.of(configs));
 			replaceStep(builder.build());
 			return this;
 		}

@@ -15,12 +15,15 @@
  */
 package com.diffplug.spotless.extra.glue.jdt.cleanup;
 
+import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.jdt.core.IBuffer;
 import org.eclipse.jdt.core.ICompilationUnit;
+import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.internal.core.CompilationUnit;
 import org.eclipse.jdt.internal.core.DefaultWorkingCopyOwner;
 import org.eclipse.jdt.internal.core.JavaElement;
@@ -46,8 +49,8 @@ public final class StubCompilationUnit extends CompilationUnit {
 	public StubCompilationUnit(String source, String unitName) {
 		// owner must be non-null — JavaElement.hashCode() is final and dereferences it via
 		// calculateHashCode().
-		super(null, unitName, DefaultWorkingCopyOwner.PRIMARY);
-		this.buffer = new StubBuffer(source);
+		super(null, Objects.requireNonNull(unitName, "unitName"), DefaultWorkingCopyOwner.PRIMARY);
+		this.buffer = new StubBuffer(Objects.requireNonNull(source, "source"));
 		this.fakeFile = StubProxies.createFakeFile();
 		this.unitName = unitName;
 	}
@@ -62,9 +65,20 @@ public final class StubCompilationUnit extends CompilationUnit {
 		return StubJavaProject.INSTANCE;
 	}
 
+	/**
+	 * Honour {@code inheritJavaCoreOptions}: when true, merge the Spotless-pinned options on top of
+	 * the workbench-wide defaults so cleanups inspecting unrelated keys (e.g.
+	 * {@code COMPILER_PB_RAW_TYPE_REFERENCE}) get the correct answer. The default impl in
+	 * {@link CompilationUnit} would otherwise return only Spotless's pin, breaking the contract.
+	 */
 	@Override
 	public Map<String, String> getOptions(boolean inheritJavaCoreOptions) {
-		return CleanUpConstants.DEFAULT_COMPILER_OPTIONS;
+		if (!inheritJavaCoreOptions) {
+			return CleanUpConstants.DEFAULT_COMPILER_OPTIONS;
+		}
+		Map<String, String> merged = new HashMap<>(JavaCore.getOptions());
+		merged.putAll(CleanUpConstants.DEFAULT_COMPILER_OPTIONS);
+		return merged;
 	}
 
 	@Override
