@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<profiles version="2">
+    <profile kind="CleanUpProfile" name="spotless-test-format-source-code" version="2">
+        <!-- Even when format_source_code=true is set, Spotless ignores it because formatting
+             is handled by the dedicated EclipseJdtFormatterStep. -->
+        <setting id="cleanup.format_source_code" value="true"/>
+        <setting id="cleanup.format_source_code_changes_only" value="true"/>
+        <!-- Plus a real cleanup so the test verifies the rest of the pipeline still runs. -->
+        <setting id="cleanup.make_variable_declarations_final" value="true"/>
+        <setting id="cleanup.make_local_variable_final" value="true"/>
+    </profile>
+</profiles>

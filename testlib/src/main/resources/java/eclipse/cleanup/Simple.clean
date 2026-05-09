@@ -1,0 +1,8 @@
+package test;
+
+public class Simple {
+	public int sum(int a, int b) {
+		final int result = a + b;
+		return result;
+	}
+}

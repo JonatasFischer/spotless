@@ -388,11 +388,14 @@ public class JavaExtension extends FormatExtension implements HasBuiltinDelimite
 
 	}
 
+	/** Applies Eclipse JDT Clean Up actions using the default JDT version. */
 	public EclipseCleanUpConfig eclipseCleanUp() {
 		return eclipseCleanUp(EclipseJdtCleanUpStep.defaultVersion());
 	}
 
+	/** Applies Eclipse JDT Clean Up actions pinned to a specific JDT version (e.g. {@code "4.39"}). */
 	public EclipseCleanUpConfig eclipseCleanUp(String version) {
+		Objects.requireNonNull(version, "version");
 		return new EclipseCleanUpConfig(version);
 	}
 
@@ -405,16 +408,34 @@ public class JavaExtension extends FormatExtension implements HasBuiltinDelimite
 			addStep(builder.build());
 		}
 
+		/** Sets the Eclipse JDT clean-up profile XML file (or files) to apply. */
 		public EclipseCleanUpConfig configFile(Object... configFiles) {
 			requireElementsNonNull(configFiles);
-			Project project = getProject();
-			builder.setPreferences(project.files(configFiles).getFiles());
+			builder.setPreferences(getProject().files(configFiles).getFiles());
 			replaceStep(builder.build());
 			return this;
 		}
 
+		/** Configures P2 mirrors used when resolving the JDT bundles. */
 		public EclipseCleanUpConfig withP2Mirrors(Map<String, String> mirrors) {
+			Objects.requireNonNull(mirrors, "mirrors");
 			builder.setP2Mirrors(mirrors);
+			replaceStep(builder.build());
+			return this;
+		}
+
+		/** Overrides the cache directory used by the Equo P2 provisioner. */
+		public EclipseCleanUpConfig withCacheDirectory(File cacheDirectory) {
+			Objects.requireNonNull(cacheDirectory, "cacheDirectory");
+			builder.setCacheDirectory(cacheDirectory);
+			replaceStep(builder.build());
+			return this;
+		}
+
+		/** Switches to a different Eclipse JDT version after construction. */
+		public EclipseCleanUpConfig withVersion(String version) {
+			Objects.requireNonNull(version, "version");
+			builder.setVersion(version);
 			replaceStep(builder.build());
 			return this;
 		}

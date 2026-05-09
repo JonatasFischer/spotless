@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<profiles version="2">
+    <profile kind="CleanUpProfile" name="spotless-test-empty" version="2">
+        <setting id="cleanup.format_source_code" value="false"/>
+    </profile>
+</profiles>

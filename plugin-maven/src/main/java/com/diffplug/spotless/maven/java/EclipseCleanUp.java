@@ -17,7 +17,7 @@ package com.diffplug.spotless.maven.java;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import org.apache.maven.plugins.annotations.Parameter;
@@ -44,12 +44,15 @@ import com.diffplug.spotless.maven.FormatterStepFactory;
  */
 public class EclipseCleanUp implements FormatterStepFactory {
 
+	/** Path to the Eclipse JDT clean-up profile XML. Optional — when omitted no cleanup runs. */
 	@Parameter
 	private String file;
 
+	/** Eclipse JDT version. When omitted, {@link EclipseJdtCleanUpStep#defaultVersion()} is used. */
 	@Parameter
 	private String version;
 
+	/** P2 mirrors used when resolving the Eclipse JDT bundles. */
 	@Parameter
 	private List<P2Mirror> p2Mirrors = new ArrayList<>();
 
@@ -57,11 +60,12 @@ public class EclipseCleanUp implements FormatterStepFactory {
 
 	@Override
 	public FormatterStep newFormatterStep(FormatterStepConfig stepConfig) {
-		EclipseJdtCleanUpStep.Builder builder = EclipseJdtCleanUpStep.createBuilder(stepConfig.getProvisioner(), stepConfig.getP2Provisioner());
-		builder.setVersion(version == null ? EclipseJdtCleanUpStep.defaultVersion() : version);
+		EclipseJdtCleanUpStep.Builder builder = EclipseJdtCleanUpStep.createBuilder(
+				stepConfig.getProvisioner(), stepConfig.getP2Provisioner());
+		builder.setVersion(version != null ? version : EclipseJdtCleanUpStep.defaultVersion());
 		if (file != null) {
 			File settingsFile = stepConfig.getFileLocator().locateFile(file);
-			builder.setPreferences(Arrays.asList(settingsFile));
+			builder.setPreferences(Collections.singletonList(settingsFile));
 		}
 		builder.setP2Mirrors(p2Mirrors);
 		if (cacheDirectory != null) {

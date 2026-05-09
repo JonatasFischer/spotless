@@ -16,6 +16,8 @@
 package com.diffplug.spotless.extra.java;
 
 import java.io.File;
+import java.lang.reflect.Method;
+import java.util.List;
 import java.util.Properties;
 
 import com.diffplug.common.collect.ImmutableMap;
@@ -85,32 +87,53 @@ import dev.equo.solstice.p2.P2Model;
  * formatting is handled separately by {@link EclipseJdtFormatterStep}.
  */
 public final class EclipseJdtCleanUpStep {
-	// prevent direct instantiation
-	private EclipseJdtCleanUpStep() {}
 
 	private static final String NAME = "eclipse jdt clean up";
+	private static final String IMPL_FQN = "com.diffplug.spotless.extra.glue.jdt.EclipseJdtCleanUpImpl";
+	private static final String IMPL_METHOD = "cleanUp";
+
 	private static final String DEFAULT_VERSION = "4.39";
 	private static final int MIN_JVM = 17;
 	private static final Jvm.Support<String> JVM_SUPPORT = Jvm.<String> support(NAME).add(MIN_JVM, DEFAULT_VERSION);
+
+	/** Bundles installed via P2 to satisfy the Solstice OSGi bootstrap performed by the impl. */
+	private static final List<String> REQUIRED_BUNDLES = List.of(
+			"org.eclipse.jdt.core",
+			"org.eclipse.jdt.core.manipulation",
+			"org.eclipse.ltk.core.refactoring",
+			// Bootstrapped explicitly in EclipseJdtCleanUpImpl — without these the cleanups that
+			// touch ImportRewrite (lambda conversion, remove unused imports, ...) silently fail.
+			"org.eclipse.core.runtime",
+			"org.eclipse.equinox.preferences");
+
+	private EclipseJdtCleanUpStep() {}
 
 	public static String defaultVersion() {
 		return JVM_SUPPORT.getRecommendedFormatterVersion();
 	}
 
-	public static EclipseJdtCleanUpStep.Builder createBuilder(Provisioner provisioner, P2Provisioner p2Provisioner) {
-		return new EclipseJdtCleanUpStep.Builder(NAME, provisioner, p2Provisioner, defaultVersion(), EclipseJdtCleanUpStep::apply, ImmutableMap.builder());
+	public static Builder createBuilder(Provisioner provisioner, P2Provisioner p2Provisioner) {
+		return new Builder(NAME, provisioner, p2Provisioner, defaultVersion(),
+				EclipseJdtCleanUpStep::apply, ImmutableMap.builder());
 	}
 
 	private static FormatterFunc apply(EquoBasedStepBuilder.State state) throws Exception {
 		JVM_SUPPORT.assertFormatterSupported(state.getSemanticVersion());
-		Class<?> cleanUpClazz = state.getJarState().getClassLoader().loadClass("com.diffplug.spotless.extra.glue.jdt.EclipseJdtCleanUpImpl");
-		var cleanUp = cleanUpClazz.getConstructor(Properties.class).newInstance(state.getPreferences());
-		var method = cleanUpClazz.getMethod("cleanUp", String.class, File.class);
-		FormatterFunc formatterFunc = (FormatterFunc.NeedsFile) (input, file) -> (String) method.invoke(cleanUp, input, file);
-		return JVM_SUPPORT.suggestLaterVersionOnError(state.getSemanticVersion(), formatterFunc);
+		Class<?> implClass = state.getJarState().getClassLoader().loadClass(IMPL_FQN);
+		Object impl = implClass.getConstructor(Properties.class).newInstance(state.getPreferences());
+		Method method = implClass.getMethod(IMPL_METHOD, String.class, File.class);
+		FormatterFunc func = (FormatterFunc.NeedsFile) (input, file) -> (String) method.invoke(impl, input, file);
+		return JVM_SUPPORT.suggestLaterVersionOnError(state.getSemanticVersion(), func);
 	}
 
-	public static class Builder extends EquoBasedStepBuilder {
+	/** Tolerates {@code "4.39.0"} as an alias for {@code "4.39"} since the P2 repo URL is short-form only. */
+	private static String normaliseVersion(String version) {
+		return version.endsWith(".0")
+				? version.substring(0, version.length() - 2)
+				: version;
+	}
+
+	public static final class Builder extends EquoBasedStepBuilder {
 		Builder(
 				String formatterName,
 				Provisioner mavenProvisioner,
@@ -123,28 +146,15 @@ public final class EclipseJdtCleanUpStep {
 
 		@Override
 		protected P2Model model(String version) {
-			var model = new P2Model();
+			P2Model model = new P2Model();
 			addPlatformRepo(model, version);
-			model.getInstall().add("org.eclipse.jdt.core");
-			model.getInstall().add("org.eclipse.jdt.core.manipulation");
-			model.getInstall().add("org.eclipse.ltk.core.refactoring");
-			// Required for the Solstice OSGi bootstrap that EclipseJdtCleanUpImpl performs:
-			// without an initialised IPreferencesService and JavaModelManager, cleanups that
-			// touch ImportRewrite (lambda conversion, remove unused imports, ...) silently
-			// fail.
-			model.getInstall().add("org.eclipse.core.runtime");
-			model.getInstall().add("org.eclipse.equinox.preferences");
+			REQUIRED_BUNDLES.forEach(model.getInstall()::add);
 			return model;
 		}
 
 		@Override
 		public void setVersion(String version) {
-			// Mirror EclipseJdtFormatterStep: tolerate "4.39.0" as an alias for "4.39"
-			// (the P2 repo URL only knows the short form).
-			if (version.endsWith(".0")) {
-				version = version.substring(0, version.length() - 2);
-			}
-			super.setVersion(version);
+			super.setVersion(normaliseVersion(version));
 		}
 	}
 }

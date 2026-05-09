@@ -30,9 +30,15 @@ dependencies {
 	testImplementation libs.assertj.core
 	testImplementation libs.durian.testlib
 	testRuntimeOnly "org.junit.platform:junit-platform-launcher"
-	// selfie-runner-junit5 pulls junit-platform-launcher:1.0.0 which is incompatible
-	// with junit-jupiter:6.x. Force resolution to a compatible version.
-	testRuntimeOnly "org.junit.platform:junit-platform-launcher:6.0.3"
+
+	// selfie-runner-junit5 pulls junit-platform-launcher:1.0.0 transitively, which is
+	// incompatible with junit-jupiter:6.x. Use a constraint (instead of a duplicate
+	// testRuntimeOnly line) so dependency resolution forces a compatible launcher.
+	constraints {
+		testRuntimeOnly("org.junit.platform:junit-platform-launcher:6.0.3") {
+			because "selfie-runner-junit5 transitively pulls junit-platform-launcher 1.0.0 which is incompatible with junit-jupiter 6.x"
+		}
+	}
 }
 
 spotless {
