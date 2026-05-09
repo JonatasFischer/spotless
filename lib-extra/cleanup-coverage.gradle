@@ -150,7 +150,9 @@ dependencies {
 }
 
 tasks.register('pitestCleanUp', JavaExec) {
-	dependsOn tasks.named('test'), tasks.named('jar')
+	// PIT runs its own targeted test execution; depending on `test` would couple us to flaky
+	// tests in unrelated modules. We only need the test classes compiled and the jar built.
+	dependsOn tasks.named('compileTestJava'), tasks.named('jar')
 	description = 'Runs PIT mutation testing on the Eclipse JDT clean-up classes (target: 100% mutation coverage).'
 	group = 'verification'
 	classpath = configurations.pitestRuntime + sourceSets.test.runtimeClasspath + files(tasks.named('jar'))

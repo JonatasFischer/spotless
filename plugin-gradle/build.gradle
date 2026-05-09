@@ -4,6 +4,7 @@ version = spotlessChangelog.versionNext
 apply plugin: 'java-library'
 apply plugin: 'com.gradle.plugin-publish'
 apply plugin: 'java-gradle-plugin'
+apply plugin: 'jacoco'
 apply from: rootProject.file('gradle/java-setup.gradle')
 apply from: rootProject.file('gradle/spotless-freshmark.gradle')
 
@@ -92,3 +93,7 @@ tasks.named("publishPlugins") {
 
 // have to apply java-publish after setting up the pluginBundle
 apply from: rootProject.file('gradle/java-publish.gradle')
+
+// JaCoCo + PIT gates for the Eclipse JDT Clean Up DSL — kept in a dedicated
+// script so this build file stays focused on plugin-publishing concerns.
+apply from: 'cleanup-coverage.gradle'
