@@ -27,7 +27,11 @@ import static com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpConstants.REQU
 
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
@@ -88,11 +92,12 @@ public final class SolsticeBootstrap {
 		Solstice solstice = Solstice.findBundlesOnClasspath();
 		solstice.warnAndModifyManifestsToFix();
 
+		Path instanceArea = Files.createTempDirectory(INSTANCE_AREA_PREFIX);
+		registerInstanceAreaCleanup(instanceArea);
 		Map<String, String> props = Map.of(
 				"osgi.nl", "en_US",
 				Constants.FRAMEWORK_STORAGE_CLEAN, Constants.FRAMEWORK_STORAGE_CLEAN_ONFIRSTINIT,
-				EquinoxLocations.PROP_INSTANCE_AREA,
-				Files.createTempDirectory(INSTANCE_AREA_PREFIX).toAbsolutePath().toString());
+				EquinoxLocations.PROP_INSTANCE_AREA, instanceArea.toAbsolutePath().toString());
 
 		solstice.openShim(props);
 		ShimIdeBootstrapServices.apply(props, solstice.getContext());
@@ -107,6 +112,36 @@ public final class SolsticeBootstrap {
 		for (String bundle : REQUIRED_BUNDLES) {
 			solstice.start(bundle);
 		}
+	}
+
+	/**
+	 * Registers a JVM shutdown hook that recursively deletes {@code instanceArea}. Long-lived
+	 * Gradle daemons would otherwise accumulate {@code spotless-jdt-cleanup*} directories in the
+	 * temp folder until the OS reclaims them.
+	 */
+	private static void registerInstanceAreaCleanup(Path instanceArea) {
+		Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+			try {
+				if (!Files.exists(instanceArea)) {
+					return;
+				}
+				Files.walkFileTree(instanceArea, new SimpleFileVisitor<Path>() {
+					@Override
+					public FileVisitResult visitFile(Path f, BasicFileAttributes attrs) throws IOException {
+						Files.deleteIfExists(f);
+						return FileVisitResult.CONTINUE;
+					}
+
+					@Override
+					public FileVisitResult postVisitDirectory(Path d, IOException exc) throws IOException {
+						Files.deleteIfExists(d);
+						return FileVisitResult.CONTINUE;
+					}
+				});
+			} catch (IOException ignored) {
+				// shutdown-hook best-effort; nothing actionable on failure
+			}
+		}, "spotless-jdt-cleanup-tempdir-cleanup"));
 	}
 
 	/**

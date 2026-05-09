@@ -139,6 +139,25 @@ public final class EclipseJdtCleanUpStep {
 				: version;
 	}
 
+	/**
+	 * Pre-flight check on the user-supplied version string. Catches obvious typos (non-Eclipse
+	 * version numbers, words like "latest") at builder time rather than letting them fail much
+	 * later inside the P2 provisioner with a 404 on the repository URL.
+	 */
+	private static void validateVersion(String version) {
+		if (version == null || version.isBlank()) {
+			throw new IllegalArgumentException(
+					"Eclipse JDT version must not be blank; supply a version like \""
+							+ DEFAULT_VERSION + "\".");
+		}
+		String normalised = normaliseVersion(version);
+		if (!normalised.matches("4\\.\\d+(?:\\.\\d+)?")) {
+			throw new IllegalArgumentException(
+					"Eclipse JDT version '" + version + "' is not a valid Eclipse Platform version (expected 4.x or 4.x.y, e.g. \""
+							+ DEFAULT_VERSION + "\").");
+		}
+	}
+
 	public static final class Builder extends EquoBasedStepBuilder {
 		Builder(
 				String formatterName,
@@ -160,6 +179,7 @@ public final class EclipseJdtCleanUpStep {
 
 		@Override
 		public void setVersion(String version) {
+			validateVersion(version);
 			super.setVersion(normaliseVersion(version));
 		}
 	}

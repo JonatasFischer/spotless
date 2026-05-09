@@ -18,7 +18,9 @@ package com.diffplug.spotless.maven.java;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.maven.plugins.annotations.Parameter;
 import org.eclipse.aether.RepositorySystemSession;
@@ -35,7 +37,11 @@ import com.diffplug.spotless.maven.FormatterStepFactory;
  * <p>Configured in {@code pom.xml} as:
  * <pre>{@code
  * <eclipseCleanUp>
+ *   <!-- either <file> or <settings> (both is fine; <settings> wins) -->
  *   <file>path/to/cleanup.xml</file>
+ *   <settings>
+ *     <cleanup.make_local_variable_final>true</cleanup.make_local_variable_final>
+ *   </settings>
  *   <version>4.39</version>
  * </eclipseCleanUp>
  * }</pre>
@@ -44,9 +50,19 @@ import com.diffplug.spotless.maven.FormatterStepFactory;
  */
 public class EclipseCleanUp implements FormatterStepFactory {
 
-	/** Path to the Eclipse JDT clean-up profile XML. Optional — when omitted no cleanup runs. */
+	/** Path to the Eclipse JDT clean-up profile XML. Optional when {@link #settings} is supplied. */
 	@Parameter
 	private String file;
+
+	/**
+	 * Inline cleanup settings. The keys mirror the {@code <setting id="..."/>} entries of an
+	 * Eclipse-exported profile XML (e.g. {@code cleanup.make_local_variable_final}).
+	 *
+	 * <p>When both {@link #file} and {@code settings} are provided the inline values are merged on
+	 * top of the file's, so an inline entry overrides the file's value for the same key.
+	 */
+	@Parameter
+	private Map<String, String> settings = new LinkedHashMap<>();
 
 	/** Eclipse JDT version. When omitted, {@link EclipseJdtCleanUpStep#defaultVersion()} is used. */
 	@Parameter
@@ -67,6 +83,9 @@ public class EclipseCleanUp implements FormatterStepFactory {
 			File settingsFile = stepConfig.getFileLocator().locateFile(file);
 			builder.setPreferences(Collections.singletonList(settingsFile));
 		}
+		if (settings != null && !settings.isEmpty()) {
+			builder.setPropertyPreferences(toPropertyLines(settings));
+		}
 		builder.setP2Mirrors(p2Mirrors);
 		if (cacheDirectory != null) {
 			builder.setCacheDirectory(cacheDirectory);
@@ -77,5 +96,17 @@ public class EclipseCleanUp implements FormatterStepFactory {
 	@Override
 	public void init(RepositorySystemSession repositorySystemSession) {
 		this.cacheDirectory = repositorySystemSession.getLocalRepository().getBasedir();
+	}
+
+	/**
+	 * Renders the inline {@code <settings>} map as a single {@code .properties}-style string that
+	 * {@link EclipseJdtCleanUpStep.Builder#setPropertyPreferences(List)} can ingest.
+	 */
+	private static List<String> toPropertyLines(Map<String, String> settings) {
+		StringBuilder sb = new StringBuilder(settings.size() * 32);
+		for (Map.Entry<String, String> entry : settings.entrySet()) {
+			sb.append(entry.getKey()).append('=').append(entry.getValue()).append('\n');
+		}
+		return Collections.singletonList(sb.toString());
 	}
 }

@@ -56,7 +56,7 @@ Spotless supports all of Gradle's built-in performance features (incremental bui
   - [Git hook (optional)](#git-hook)
   - [Linting](#linting)
 - **Languages**
-  - [Java](#java) ([google-java-format](#google-java-format), [eclipse jdt](#eclipse-jdt), [clang-format](#clang-format), [prettier](#prettier), [palantir-java-format](#palantir-java-format), [formatAnnotations](#formatAnnotations), [cleanthat](#cleanthat), [tabletest-formatter](#tabletest-formatter), [IntelliJ IDEA](#intellij-idea))
+  - [Java](#java) ([google-java-format](#google-java-format), [eclipse jdt](#eclipse-jdt), [eclipse jdt clean up](#eclipse-jdt-clean-up), [clang-format](#clang-format), [prettier](#prettier), [palantir-java-format](#palantir-java-format), [formatAnnotations](#formatAnnotations), [cleanthat](#cleanthat), [tabletest-formatter](#tabletest-formatter), [IntelliJ IDEA](#intellij-idea))
   - [Groovy](#groovy) ([eclipse groovy](#eclipse-groovy))
   - [Kotlin](#kotlin) ([ktfmt](#ktfmt), [ktlint](#ktlint), [diktat](#diktat), [tabletest-formatter](#tabletest-formatter-1), [prettier](#prettier))
   - [Scala](#scala) ([scalafmt](#scalafmt))
@@ -367,6 +367,69 @@ You can enable/disable the globally defined sort properties on file level by add
 - `// @SortMembers:enabled=false` - disable the Sort Members feature for this file
 - `// @SortMembers:doNotSortFields=true` - disable the sorting of static and instance fields
 - `// @SortMembers:sortByVisibility=false` - don't sort members by its visibility modifier
+
+### eclipse jdt clean up
+
+[homepage](https://download.eclipse.org/eclipse/downloads/). Applies the same automatic Clean Up actions you would
+configure in Eclipse IDE under *Preferences → Java → Code Style → Clean Up*. The cleanup profile is exported from
+Eclipse IDE via *Clean Up → Export*; the resulting XML drives the step.
+
+The step bootstraps a headless OSGi runtime so most cleanups work the same way as inside Eclipse IDE itself
+— including the ones that go through the import-rewrite pipeline (remove unused imports, lambda conversion).
+
+```gradle
+spotless {
+  java {
+    eclipseCleanUp().configFile('cleanup.xml')
+    // Or pin a specific Eclipse JDT version
+    eclipseCleanUp('4.39').configFile('cleanup.xml')
+    // Or supply the profile inline as XML
+    eclipseCleanUp().configXml("""
+    <?xml version="1.0" encoding="UTF-8" standalone="no"?>
+    <profiles version="2">
+        <profile kind="CleanUpProfile" name="my-profile" version="2">
+            <setting id="cleanup.make_variable_declarations_final" value="true"/>
+            <setting id="cleanup.make_local_variable_final" value="true"/>
+            <setting id="cleanup.make_parameters_final" value="true"/>
+            <setting id="cleanup.remove_unused_imports" value="true"/>
+            <setting id="cleanup.format_source_code" value="false"/>
+        </profile>
+    </profiles>
+    """)
+    // Or supply it as a Java .properties string (key/value lines)
+    eclipseCleanUp().configProperties("""
+    cleanup.make_variable_declarations_final=true
+    cleanup.make_local_variable_final=true
+    cleanup.format_source_code=false
+    """)
+    // P2 mirrors are configurable when downloads.eclipse.org is unreachable
+    eclipseCleanUp().withP2Mirrors(['https://download.eclipse.org/eclipse/updates/4.39/':'https://some.internal.mirror/4-39/'])
+  }
+}
+```
+
+#### Verified working cleanups
+
+- `cleanup.make_variable_declarations_final` (master + variants `make_local_variable_final`, `make_parameters_final`, `make_private_fields_final`)
+- `cleanup.convert_functional_interfaces` + `cleanup.use_lambda` (anonymous-class to lambda)
+- `cleanup.remove_unused_imports`
+- `cleanup.remove_unnecessary_casts`
+- `cleanup.valueof_rather_than_instantiation` (e.g. `new Integer(v)` → `Integer.valueOf(v)`)
+- `cleanup.boolean_value_rather_than_comparison` (e.g. `flag == true` → `flag`)
+
+#### Known limitations
+
+A few cleanups generate a fix successfully but fail when JDT tries to attach it to a `CompilationUnitChange`,
+because the attach path requires a real Eclipse `PackageFragmentRoot` (not stubbable without spinning up a
+workspace). The affected cleanups are silently skipped (logged at JUL `FINE` so users can opt in to detailed
+diagnostics):
+
+- `cleanup.instanceof` (pattern matching for instanceof)
+- `cleanup.convert_to_switch_expressions`
+- `cleanup.convert_to_enhanced_for_loop`
+
+`cleanup.format_source_code` is intentionally forced to `false` because Spotless's [eclipse jdt](#eclipse-jdt)
+formatter step owns formatting.
 
 ### formatAnnotations
 

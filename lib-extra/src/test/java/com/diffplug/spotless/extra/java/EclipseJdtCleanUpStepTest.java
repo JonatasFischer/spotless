@@ -158,6 +158,29 @@ class EclipseJdtCleanUpStepTest extends ResourceHarness {
 		}
 
 		@Test
+		@DisplayName("setVersion rejects nonsense version strings with a clear error")
+		void setVersionRejectsBadInput() {
+			EquoBasedStepBuilder builder = createBuilder();
+			assertThatThrownBy(() -> builder.setVersion("latest"))
+					.isInstanceOf(IllegalArgumentException.class)
+					.hasMessageContaining("4.39");
+			assertThatThrownBy(() -> builder.setVersion(""))
+					.isInstanceOf(IllegalArgumentException.class);
+			assertThatThrownBy(() -> builder.setVersion("3.99"))
+					.isInstanceOf(IllegalArgumentException.class)
+					.hasMessageContaining("4.x");
+		}
+
+		@Test
+		@DisplayName("setVersion accepts canonical and trailing-zero variants")
+		void setVersionAcceptsCanonicalForms() {
+			EquoBasedStepBuilder builder = createBuilder();
+			builder.setVersion("4.39");
+			builder.setVersion("4.39.0"); // normalised to 4.39 internally
+			builder.setVersion("4.40");
+		}
+
+		@Test
 		@DisplayName("EclipseJdtCleanUpStep#REQUIRED_BUNDLES is in sync with the runtime activator list")
 		void requiredBundlesAreInSync() {
 			// Read the runtime activator list reflectively from the jdt source set's
