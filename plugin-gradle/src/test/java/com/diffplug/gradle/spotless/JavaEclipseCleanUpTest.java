@@ -97,6 +97,58 @@ class JavaEclipseCleanUpTest extends GradleIntegrationHarness {
 	}
 
 	@Test
+	void nativeModernizationsApplyTogetherAndCompile() throws IOException {
+		setFile("build.gradle").toLines(
+				"plugins { id 'com.diffplug.spotless'; id 'java' }",
+				"repositories { mavenCentral() }",
+				"spotless { java { eclipseCleanUp().javaVersion('17').strict(true).configProperties('''",
+				"cleanup.use_var=true",
+				"cleanup.stringconcat_to_textblock=true",
+				"cleanup.multi_catch=true",
+				"cleanup.remove_redundant_type_arguments=true",
+				"''') } }",
+				"tasks.named('compileJava') { dependsOn 'spotlessApply'; options.release = 17 }");
+		String[] names = {"NativeVar", "NativeVarLambda", "NativeTextBlock", "NativeMultiCatch", "NativeDiamond"};
+		for (String name : names) {
+			setFile("src/main/java/example/" + name + ".java").toResource("java/eclipse/cleanup/" + name + ".test");
+		}
+		gradleRunner().withArguments("compileJava").build();
+		for (String name : names) {
+			assertFile("src/main/java/example/" + name + ".java").sameAsResource("java/eclipse/cleanup/" + name + ".clean");
+		}
+		gradleRunner().withArguments("spotlessCheck").build();
+	}
+
+	@Test
+	void nativeSimplificationsApplyTogetherAndCompile() throws IOException {
+		setFile("build.gradle").toLines(
+				"plugins { id 'com.diffplug.spotless'; id 'java' }",
+				"repositories { mavenCentral() }",
+				"spotless { java { eclipseCleanUp().javaVersion('8').strict(true).configProperties('''",
+				"cleanup.primitive_rather_than_wrapper=true",
+				"cleanup.stringbuffer_to_stringbuilder=true",
+				"cleanup.stringbuilder_for_local_vars=true",
+				"cleanup.remove_redundant_modifiers=true",
+				"cleanup.remove_redundant_semicolons=true",
+				"cleanup.no_super=true",
+				"cleanup.add_all=true",
+				"cleanup.collection_cloning=true",
+				"cleanup.remove_unnecessary_array_creation=true",
+				"''') } }",
+				"tasks.named('compileJava') { dependsOn 'spotlessApply'; options.release = 8 }");
+		String[] names = {"NativePrimitive", "NativeStringBuffer", "NativeModifiers", "NativeSemicolons",
+				"NativeSuperCall", "NativeAddAll", "NativeCollectionCopy", "NativeArrayCreation"};
+		for (String name : names) {
+			setFile("src/main/java/example/" + name + ".java").toResource("java/eclipse/cleanup/" + name + ".test");
+		}
+		gradleRunner().withArguments("compileJava").build();
+		for (String name : names) {
+			assertFile("src/main/java/example/" + name + ".java").sameAsResource("java/eclipse/cleanup/" + name + ".clean");
+		}
+		gradleRunner().withArguments("spotlessCheck").build();
+	}
+
+	@Test
 	void headlessRefactoringsCompileAndSupportConfigurationCache() throws IOException {
 		setFile("build.gradle").toLines(
 				"plugins { id 'com.diffplug.spotless'; id 'java' }",

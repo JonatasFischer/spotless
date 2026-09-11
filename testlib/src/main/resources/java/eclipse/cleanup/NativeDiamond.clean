@@ -1,0 +1,12 @@
+package example;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class NativeDiamond {
+	public static String value() {
+		List<String> values = new ArrayList<>();
+		values.add("preserved");
+		return values.get(0);
+	}
+}

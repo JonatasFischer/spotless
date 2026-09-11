@@ -1,0 +1,9 @@
+package example;
+
+public class NativeSemicolons {
+	public static String value() {
+		int count = 0;;
+		count++;
+		return Integer.toString(count);
+	};
+};

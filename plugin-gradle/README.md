@@ -527,6 +527,43 @@ always fail. Additional exception details are available through JUL `FINE` loggi
 - `cleanup.instanceof` (pattern matching for instanceof)
 - `cleanup.convert_to_switch_expressions`
 - `cleanup.convert_to_enhanced_for_loop`
+- `cleanup.use_var` (Java 10+; lambda parameters are converted only on Java 11+)
+- `cleanup.stringconcat_to_textblock` (Java 15+)
+  - Also enable `cleanup.stringconcat_stringbuffer_stringbuilder` to include eligible `StringBuilder`/`StringBuffer` sequences.
+- `cleanup.multi_catch` (merges compatible catches with equivalent bodies)
+- `cleanup.remove_redundant_type_arguments` (uses `<>` where type arguments are redundant)
+- `cleanup.insert_inferred_type_arguments` (makes inferred constructor type arguments explicit)
+- `cleanup.primitive_rather_than_wrapper` (uses primitives for eligible wrapper variables)
+- `cleanup.stringbuffer_to_stringbuilder`
+  - Enable `cleanup.stringbuilder_for_local_vars` to restrict conversion to eligible local variables. Without this option, Eclipse also converts other declarations, potentially changing method signatures and synchronization behavior.
+- `cleanup.remove_redundant_modifiers`
+- `cleanup.remove_redundant_semicolons`
+- `cleanup.no_super` (removes redundant no-argument `super()` constructor calls)
+- `cleanup.add_all` (replaces eligible element-copy loops with bulk additions)
+- `cleanup.collection_cloning` (uses collection copy constructors)
+- `cleanup.remove_unnecessary_array_creation` (removes eligible explicit arrays in varargs calls)
+
+These actions delegate directly to Eclipse's native cleanup implementations, including their binding
+analysis and applicability checks. Multi-catch and diamond are available at all supported source
+levels (Java 8+). Choose one type-argument policy; if both are enabled, Eclipse gives insertion priority.
+The primitive, buffer, redundancy, collection and array actions also work at Java 8+. Bulk additions
+run before collection cloning so the two native cleanups can compose.
+Local type inference (`var`) runs last, after other actions have updated declarations and initializers.
+
+For example, enable the native modernization actions together:
+
+```gradle
+spotless {
+  java {
+    eclipseCleanUp().javaVersion('17').strict(true).configProperties('''
+      cleanup.use_var=true
+      cleanup.stringconcat_to_textblock=true
+      cleanup.multi_catch=true
+      cleanup.remove_redundant_type_arguments=true
+    ''')
+  }
+}
+```
 
 #### Known limitations
 

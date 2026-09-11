@@ -1,0 +1,11 @@
+package example;
+
+public class NativeModifiers {
+	interface Constants {
+		int VALUE = 7;
+		int get();
+	}
+	public static String value() {
+		return Integer.toString(Constants.VALUE);
+	}
+}

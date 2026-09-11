@@ -1,0 +1,10 @@
+package example;
+
+public class NativeSuperCall {
+	public NativeSuperCall() {
+		super();
+	}
+	public static String value() {
+		return new NativeSuperCall().getClass().getSimpleName();
+	}
+}

@@ -1,0 +1,14 @@
+package example;
+
+import java.util.ArrayList;
+
+public class NativeVar {
+	public static String value() {
+		var values = new ArrayList<String>();
+		values.add("x");
+		var total = 1L;
+		return values.get(0) + ":" + kind(total);
+	}
+	private static String kind(long value) { return "long"; }
+	private static String kind(int value) { return "int"; }
+}

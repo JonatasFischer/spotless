@@ -1,0 +1,9 @@
+package example;
+
+public class NativeStringBuffer {
+	public static String value() {
+		StringBuffer text = new StringBuffer();
+		text.append("item").append(7);
+		return text.toString();
+	}
+}

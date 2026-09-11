@@ -1,0 +1,12 @@
+package example;
+
+public class NativeTextBlockBuilder {
+	public static String value() {
+		String str = """
+			first
+			second
+			third
+			""";
+		return str;
+	}
+}

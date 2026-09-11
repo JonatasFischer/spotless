@@ -1,0 +1,11 @@
+package example;
+
+public class NativeTextBlockBuilder {
+	public static String value() {
+		StringBuilder text = new StringBuilder();
+		text.append("first\n");
+		text.append("second\n");
+		text.append("third\n");
+		return text.toString();
+	}
+}

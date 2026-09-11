@@ -1,0 +1,10 @@
+package example;
+
+import java.util.function.Predicate;
+
+public class NativeVarLambda {
+	public static String value() {
+		Predicate<String> predicate = (String text) -> !text.isEmpty();
+		return Boolean.toString(predicate.test("x"));
+	}
+}

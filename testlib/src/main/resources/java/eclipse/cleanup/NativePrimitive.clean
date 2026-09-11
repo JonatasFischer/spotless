@@ -1,0 +1,12 @@
+package example;
+
+public class NativePrimitive {
+	public static String value() {
+		boolean flag = Boolean.TRUE;
+		int count = 7;
+		if (flag && count > 0) {
+			return "positive";
+		}
+		return "unexpected";
+	}
+}

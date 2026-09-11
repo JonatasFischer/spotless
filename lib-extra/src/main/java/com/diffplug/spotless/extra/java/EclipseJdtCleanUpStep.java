@@ -66,6 +66,19 @@ import dev.equo.solstice.p2.P2Model;
  *   <li>{@code cleanup.instanceof} (pattern matching for instanceof)</li>
  *   <li>{@code cleanup.convert_to_switch_expressions}</li>
  *   <li>{@code cleanup.convert_to_enhanced_for_loop}</li>
+ *   <li>{@code cleanup.use_var} (Java 10+, including lambda parameters on Java 11+)</li>
+ *   <li>{@code cleanup.stringconcat_to_textblock} (Java 15+), optionally with
+ *       {@code cleanup.stringconcat_stringbuffer_stringbuilder}</li>
+ *   <li>{@code cleanup.multi_catch}</li>
+ *   <li>{@code cleanup.remove_redundant_type_arguments} or
+ *       {@code cleanup.insert_inferred_type_arguments}</li>
+ *   <li>{@code cleanup.primitive_rather_than_wrapper}</li>
+ *   <li>{@code cleanup.stringbuffer_to_stringbuilder}, optionally limited to local variables
+ *       with {@code cleanup.stringbuilder_for_local_vars}</li>
+ *   <li>{@code cleanup.remove_redundant_modifiers}, {@code cleanup.remove_redundant_semicolons}
+ *       and {@code cleanup.no_super}</li>
+ *   <li>{@code cleanup.add_all} and {@code cleanup.collection_cloning}</li>
+ *   <li>{@code cleanup.remove_unnecessary_array_creation} (eligible varargs calls)</li>
  * </ul>
  *
  * <h2>Known limitations</h2>

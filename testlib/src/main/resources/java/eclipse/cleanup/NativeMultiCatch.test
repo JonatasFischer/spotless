@@ -1,0 +1,19 @@
+package example;
+
+import java.io.IOException;
+
+public class NativeMultiCatch {
+	private static void fail() throws IOException, ReflectiveOperationException {
+		throw new IOException("expected");
+	}
+	public static String value() {
+		try {
+			fail();
+		} catch (IOException e) {
+			return e.getMessage();
+		} catch (ReflectiveOperationException e) {
+			return e.getMessage();
+		}
+		return "unexpected";
+	}
+}

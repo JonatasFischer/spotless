@@ -22,20 +22,32 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 import org.eclipse.jdt.internal.corext.fix.CleanUpConstants;
+import org.eclipse.jdt.internal.ui.fix.AddAllCleanUpCore;
 import org.eclipse.jdt.internal.ui.fix.BooleanValueRatherThanComparisonCleanUpCore;
 import org.eclipse.jdt.internal.ui.fix.CodeStyleCleanUpCore;
+import org.eclipse.jdt.internal.ui.fix.CollectionCloningCleanUpCore;
 import org.eclipse.jdt.internal.ui.fix.ConvertLoopCleanUpCore;
 import org.eclipse.jdt.internal.ui.fix.LambdaExpressionsCleanUpCore;
+import org.eclipse.jdt.internal.ui.fix.MultiCatchCleanUpCore;
 import org.eclipse.jdt.internal.ui.fix.OneIfRatherThanDuplicateBlocksThatFallThroughCleanUpCore;
 import org.eclipse.jdt.internal.ui.fix.PatternMatchingForInstanceofCleanUpCore;
 import org.eclipse.jdt.internal.ui.fix.PotentialProgrammingProblemsCleanUpCore;
 import org.eclipse.jdt.internal.ui.fix.PrimitiveComparisonCleanUpCore;
+import org.eclipse.jdt.internal.ui.fix.PrimitiveRatherThanWrapperCleanUpCore;
 import org.eclipse.jdt.internal.ui.fix.RedundantComparatorCleanUpCore;
+import org.eclipse.jdt.internal.ui.fix.RedundantModifiersCleanUp;
+import org.eclipse.jdt.internal.ui.fix.RedundantSemicolonsCleanUpCore;
+import org.eclipse.jdt.internal.ui.fix.RedundantSuperCallCleanUp;
 import org.eclipse.jdt.internal.ui.fix.ReturnExpressionCleanUpCore;
+import org.eclipse.jdt.internal.ui.fix.StringBufferToStringBuilderCleanUpCore;
+import org.eclipse.jdt.internal.ui.fix.StringConcatToTextBlockCleanUpCore;
 import org.eclipse.jdt.internal.ui.fix.SwitchExpressionsCleanUpCore;
+import org.eclipse.jdt.internal.ui.fix.TypeParametersCleanUpCore;
+import org.eclipse.jdt.internal.ui.fix.UnnecessaryArrayCreationCleanUpCore;
 import org.eclipse.jdt.internal.ui.fix.UnnecessaryCodeCleanUpCore;
 import org.eclipse.jdt.internal.ui.fix.UnusedCodeCleanUpCore;
 import org.eclipse.jdt.internal.ui.fix.ValueOfRatherThanInstantiationCleanUpCore;
+import org.eclipse.jdt.internal.ui.fix.VarCleanUpCore;
 import org.eclipse.jdt.internal.ui.fix.VariableDeclarationCleanUpCore;
 import org.eclipse.jdt.ui.cleanup.ICleanUp;
 
@@ -75,7 +87,22 @@ public final class CleanUpRegistry {
 			// Redundant comparator: e.g. Comparator.naturalOrder() simplifications
 			RedundantComparatorCleanUpCore::new,
 			// Return expression: simplify return statements
-			ReturnExpressionCleanUpCore::new);
+			ReturnExpressionCleanUpCore::new,
+			// Native modernization cleanups; Eclipse owns all AST transformations and type inference.
+			MultiCatchCleanUpCore::new,
+			TypeParametersCleanUpCore::new,
+			PrimitiveRatherThanWrapperCleanUpCore::new,
+			StringBufferToStringBuilderCleanUpCore::new,
+			RedundantModifiersCleanUp::new,
+			RedundantSemicolonsCleanUpCore::new,
+			RedundantSuperCallCleanUp::new,
+			// Run bulk-operation simplification before the copy-constructor cleanup.
+			AddAllCleanUpCore::new,
+			CollectionCloningCleanUpCore::new,
+			UnnecessaryArrayCreationCleanUpCore::new,
+			// Infer local types after other cleanups have changed declarations and initializers.
+			StringConcatToTextBlockCleanUpCore::new,
+			VarCleanUpCore::new);
 
 	// Options consumed by the registered implementations (including their subordinate switches).
 	// ORGANIZE_IMPORTS is deliberately absent: UnusedCode only consults it to disable its own
@@ -122,11 +149,29 @@ public final class CleanUpRegistry {
 			CleanUpConstants.BOOLEAN_VALUE_RATHER_THAN_COMPARISON,
 			CleanUpConstants.ONE_IF_RATHER_THAN_DUPLICATE_BLOCKS_THAT_FALL_THROUGH,
 			CleanUpConstants.REDUNDANT_COMPARATOR,
-			CleanUpConstants.RETURN_EXPRESSION);
+			CleanUpConstants.RETURN_EXPRESSION,
+			CleanUpConstants.USE_VAR,
+			CleanUpConstants.STRINGCONCAT_TO_TEXTBLOCK,
+			CleanUpConstants.STRINGCONCAT_STRINGBUFFER_STRINGBUILDER,
+			CleanUpConstants.MULTI_CATCH,
+			CleanUpConstants.INSERT_INFERRED_TYPE_ARGUMENTS,
+			CleanUpConstants.REMOVE_REDUNDANT_TYPE_ARGUMENTS,
+			CleanUpConstants.PRIMITIVE_RATHER_THAN_WRAPPER,
+			CleanUpConstants.STRINGBUFFER_TO_STRINGBUILDER,
+			CleanUpConstants.STRINGBUFFER_TO_STRINGBUILDER_FOR_LOCALS,
+			CleanUpConstants.REMOVE_REDUNDANT_MODIFIERS,
+			CleanUpConstants.REMOVE_REDUNDANT_SEMICOLONS,
+			CleanUpConstants.REDUNDANT_SUPER_CALL,
+			CleanUpConstants.CONTROL_STATEMENTS_USE_ADD_ALL,
+			CleanUpConstants.COLLECTION_CLONING,
+			CleanUpConstants.REMOVE_UNNECESSARY_ARRAY_CREATION);
 
 	private static final Map<String, Integer> MINIMUM_JAVA_VERSION = Map.of(
 			CleanUpConstants.USE_PATTERN_MATCHING_FOR_INSTANCEOF, 16,
-			CleanUpConstants.CONTROL_STATEMENTS_CONVERT_TO_SWITCH_EXPRESSIONS, 14);
+			CleanUpConstants.CONTROL_STATEMENTS_CONVERT_TO_SWITCH_EXPRESSIONS, 14,
+			CleanUpConstants.USE_VAR, 10,
+			CleanUpConstants.STRINGCONCAT_TO_TEXTBLOCK, 15,
+			CleanUpConstants.STRINGCONCAT_STRINGBUFFER_STRINGBUILDER, 15);
 
 	/** Sorted diagnostics for enabled options this pipeline cannot honor. */
 	public static List<String> profileProblems(Properties settings, String javaVersion) {

@@ -24,6 +24,8 @@ import java.util.Properties;
 
 import org.eclipse.jdt.ui.cleanup.ICleanUp;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /** Direct unit tests for {@link CleanUpRegistry}. */
 class CleanUpRegistryTest {
@@ -57,10 +59,42 @@ class CleanUpRegistryTest {
 	}
 
 	@Test
+	void recognizesTheNativeModernizationOptions() {
+		Properties profile = new Properties();
+		for (String key : List.of("cleanup.use_var", "cleanup.stringconcat_to_textblock",
+				"cleanup.stringconcat_stringbuffer_stringbuilder", "cleanup.multi_catch",
+				"cleanup.insert_inferred_type_arguments", "cleanup.remove_redundant_type_arguments")) {
+			profile.setProperty(key, "true");
+		}
+		assertThat(CleanUpRegistry.profileProblems(profile, "15")).isEmpty();
+	}
+
+	@ParameterizedTest
+	@CsvSource({"cleanup.use_var,10", "cleanup.stringconcat_to_textblock,15", "cleanup.stringconcat_stringbuffer_stringbuilder,15"})
+	void modernizationLanguageBoundaries(String key, int minimum) {
+		Properties profile = new Properties();
+		profile.setProperty(key, "true");
+		assertThat(CleanUpRegistry.profileProblems(profile, Integer.toString(minimum - 1)))
+				.containsExactly(key + ": requires Java " + minimum + " or later (configured " + (minimum - 1) + ")");
+		assertThat(CleanUpRegistry.profileProblems(profile, Integer.toString(minimum))).isEmpty();
+	}
+
+	@Test
+	void recognizesNativeSimplificationsAtTheMinimumSupportedJavaLevel() {
+		Properties profile = new Properties();
+		for (String key : List.of("cleanup.primitive_rather_than_wrapper", "cleanup.stringbuffer_to_stringbuilder",
+				"cleanup.stringbuilder_for_local_vars", "cleanup.remove_redundant_modifiers", "cleanup.remove_redundant_semicolons",
+				"cleanup.no_super", "cleanup.add_all", "cleanup.collection_cloning", "cleanup.remove_unnecessary_array_creation")) {
+			profile.setProperty(key, "true");
+		}
+		assertThat(CleanUpRegistry.profileProblems(profile, "8")).isEmpty();
+	}
+
+	@Test
 	void buildAllReturnsAllRegisteredCleanups() {
 		List<ICleanUp> cleanUps = CleanUpRegistry.buildAll();
 		// Locks the registered count — adding/removing a cleanup is a deliberate behaviour change.
-		assertThat(cleanUps).hasSize(15);
+		assertThat(cleanUps).hasSize(27);
 	}
 
 	@Test
@@ -98,7 +132,19 @@ class CleanUpRegistryTest {
 				"BooleanValueRatherThanComparisonCleanUpCore",
 				"OneIfRatherThanDuplicateBlocksThatFallThroughCleanUpCore",
 				"RedundantComparatorCleanUpCore",
-				"ReturnExpressionCleanUpCore");
+				"ReturnExpressionCleanUpCore",
+				"MultiCatchCleanUpCore",
+				"TypeParametersCleanUpCore",
+				"PrimitiveRatherThanWrapperCleanUpCore",
+				"StringBufferToStringBuilderCleanUpCore",
+				"RedundantModifiersCleanUp",
+				"RedundantSemicolonsCleanUpCore",
+				"RedundantSuperCallCleanUp",
+				"AddAllCleanUpCore",
+				"CollectionCloningCleanUpCore",
+				"UnnecessaryArrayCreationCleanUpCore",
+				"StringConcatToTextBlockCleanUpCore",
+				"VarCleanUpCore");
 	}
 
 	@Test

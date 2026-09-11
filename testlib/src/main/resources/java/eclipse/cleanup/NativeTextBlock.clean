@@ -1,0 +1,11 @@
+package example;
+
+public class NativeTextBlock {
+	public static String value() {
+		return """
+			first
+			  "quoted" \\ path
+			last
+			""";
+	}
+}

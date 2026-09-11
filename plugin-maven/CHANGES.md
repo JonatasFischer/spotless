@@ -5,6 +5,8 @@ We adhere to the [keepachangelog](https://keepachangelog.com/en/1.0.0/) format (
 ## [Unreleased]
 
 ### Added
+- Eclipse Clean Up also delegates wrapper-to-primitive conversion, StringBuffer-to-StringBuilder conversion, redundant modifiers/semicolons/super calls, bulk collection additions, collection copying and unnecessary varargs array removal to native Eclipse implementations.
+- Eclipse Clean Up delegates `var`, text blocks (including eligible string-builder sequences), multi-catch and inferred/diamond type-argument transformations to Eclipse's native implementations.
 - Add `<eclipseCleanUp>` to apply Eclipse JDT Clean Up profiles, including pattern matching, switch expressions and enhanced for-loops using an in-memory Java source model. See the README for supported actions and headless-runtime limitations.
 - Eclipse Clean Up supports `<javaVersion>` (default `17`) and opt-in `<strict>true</strict>`. Ignored actions now emit visible diagnostics, including unsupported enabled profile options and incompatible language levels.
 

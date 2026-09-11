@@ -18,16 +18,25 @@ package com.diffplug.spotless.extra.java;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.net.URL;
+import java.net.URLClassLoader;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.stream.Stream;
+
+import javax.tools.ToolProvider;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import com.diffplug.spotless.FormatterStep;
@@ -406,6 +415,181 @@ class EclipseJdtCleanUpStepTest extends ResourceHarness {
 		// On a too-old JVM the integration test in EclipseJdtFormatterStepTest catches the
 		// regression — but the unit-test JVM cannot fake a lower major version. Documented as
 		// an environment-equivalent mutant.
+	}
+
+	@Nested
+	@DisplayName("Native Eclipse modernization actions")
+	class NativeActions {
+		static Stream<Arguments> cases() {
+			return Stream.of("4.39", "4.40").flatMap(version -> Stream.of(
+					Arguments.of(version, "NativeVar", "10", "cleanup.use_var=true", "test", "clean", "x:long"),
+					Arguments.of(version, "NativeVarLambda", "11", "cleanup.use_var=true", "test", "clean", "true"),
+					Arguments.of(version, "NativeTextBlock", "15", "cleanup.stringconcat_to_textblock=true", "test", "clean", "first\n  \"quoted\" \\ path\nlast\n"),
+					Arguments.of(version, "NativeTextBlockBuilder", "15", "cleanup.stringconcat_to_textblock=true\ncleanup.stringconcat_stringbuffer_stringbuilder=true", "test", "clean", "first\nsecond\nthird\n"),
+					Arguments.of(version, "NativeMultiCatch", "8", "cleanup.multi_catch=true", "test", "clean", "expected"),
+					Arguments.of(version, "NativeDiamond", "8", "cleanup.remove_redundant_type_arguments=true", "test", "clean", "preserved"),
+					Arguments.of(version, "NativeDiamond", "8", "cleanup.insert_inferred_type_arguments=true", "clean", "test", "preserved"),
+					Arguments.of(version, "NativePrimitive", "8", "cleanup.primitive_rather_than_wrapper=true", "test", "clean", "positive"),
+					Arguments.of(version, "NativeStringBuffer", "8", "cleanup.stringbuffer_to_stringbuilder=true", "test", "clean", "item7"),
+					Arguments.of(version, "NativeStringBuffer", "8", "cleanup.stringbuffer_to_stringbuilder=true\ncleanup.stringbuilder_for_local_vars=true", "test", "clean", "item7"),
+					Arguments.of(version, "NativeModifiers", "8", "cleanup.remove_redundant_modifiers=true", "test", "clean", "7"),
+					Arguments.of(version, "NativeSemicolons", "8", "cleanup.remove_redundant_semicolons=true", "test", "clean", "1"),
+					Arguments.of(version, "NativeSuperCall", "8", "cleanup.no_super=true", "test", "clean", "NativeSuperCall"),
+					Arguments.of(version, "NativeAddAll", "8", "cleanup.add_all=true", "test", "clean", "[prefix, a, b]"),
+					Arguments.of(version, "NativeCollectionCopy", "8", "cleanup.collection_cloning=true", "test", "clean", "[a, b]"),
+					Arguments.of(version, "NativeArrayCreation", "8", "cleanup.remove_unnecessary_array_creation=true", "test", "clean", "a,b")));
+		}
+
+		static Stream<Arguments> preservedCases() {
+			return Stream.of("4.39", "4.40").flatMap(version -> Stream.of(
+					Arguments.of(version, "cleanup.primitive_rather_than_wrapper=true",
+							"public static String value() { Integer n = null; return n == null ? \"null\" : n.toString(); }", "null"),
+					Arguments.of(version, "cleanup.stringbuffer_to_stringbuilder=true\ncleanup.stringbuilder_for_local_vars=true",
+							"public static StringBuffer pass(StringBuffer text) { return text; } public static String value() { StringBuffer local = new StringBuffer(\"safe\"); return pass(local).toString(); }", "safe"),
+					Arguments.of(version, "cleanup.remove_redundant_modifiers=true",
+							"public final String locked() { return \"locked\"; } public static String value() { return new Preserved().locked(); }", "locked"),
+					Arguments.of(version, "cleanup.remove_redundant_semicolons=true",
+							"public static String value() { int n = 0; while (++n < 3); return Integer.toString(n); }", "3"),
+					Arguments.of(version, "cleanup.no_super=true",
+							"static class Parent { final int n; Parent(int n) { this.n = n; } } static class Child extends Parent { Child() { super(7); } } public static String value() { return Integer.toString(new Child().n); }", "7"),
+					Arguments.of(version, "cleanup.add_all=true",
+							"public static String value() { java.util.List<String> input = java.util.Arrays.asList(\"\", \"x\"); java.util.List<String> output = new java.util.ArrayList<>(); for (String item : input) { if (!item.isEmpty()) output.add(item); } return output.toString(); }", "[x]"),
+					Arguments.of(version, "cleanup.collection_cloning=true",
+							"public static String value() { java.util.List<String> input = java.util.Arrays.asList(\"a\"); java.util.List<String> output = new java.util.ArrayList<>(); output.add(\"prefix\"); output.addAll(input); return output.toString(); }", "[prefix, a]"),
+					Arguments.of(version, "cleanup.remove_unnecessary_array_creation=true",
+							"public static String value() { return Integer.toString(java.util.Arrays.asList(new int[] {1, 2}).size()); }", "1"),
+					Arguments.of(version, "cleanup.remove_unnecessary_array_creation=true",
+							"static String pick(String item) { return \"scalar\"; } static String pick(String... items) { return \"array\"; } public static String value() { return pick(new String[] {\"x\"}); }", "array")));
+		}
+
+		@ParameterizedTest
+		@MethodSource("preservedCases")
+		void nativeApplicabilityChecksPreserveMeaningfulCode(String version, String properties, String members, String expectedValue) throws Exception {
+			String source = "package example; public class Preserved { " + members + " }";
+			File file = setFile("Preserved.java").toContent(source);
+			String formatted = nativeBuilder(version, "8", properties).build().format(source, file);
+			assertThat(formatted).isEqualTo(source);
+			setFile("Preserved.java").toContent(formatted);
+			assertThat(compileAndRun(file, "8", "cleaned", "Preserved")).isEqualTo(expectedValue);
+		}
+
+		@ParameterizedTest
+		@ValueSource(strings = {"NativePrimitive", "NativeStringBuffer", "NativeTextBlockBuilder", "NativeCollectionCopy", "NativeVar", "NativeDiamond"})
+		void allNativeActionsComposeWithoutFurtherChanges(String fixture) throws Exception {
+			String properties = String.join("\n",
+					"cleanup.use_var=true", "cleanup.stringconcat_to_textblock=true",
+					"cleanup.stringconcat_stringbuffer_stringbuilder=true", "cleanup.multi_catch=true",
+					"cleanup.remove_redundant_type_arguments=true", "cleanup.primitive_rather_than_wrapper=true",
+					"cleanup.stringbuffer_to_stringbuilder=true", "cleanup.stringbuilder_for_local_vars=true",
+					"cleanup.remove_redundant_modifiers=true", "cleanup.remove_redundant_semicolons=true",
+					"cleanup.no_super=true", "cleanup.add_all=true", "cleanup.collection_cloning=true",
+					"cleanup.remove_unnecessary_array_creation=true");
+			File file = setFile(fixture + ".java").toResource(FIXTURES_ROOT + fixture + ".test");
+			Object originalValue = compileAndRun(file, "17", "original", fixture);
+			FormatterStep step = nativeBuilder("4.40", "17", properties).build();
+			String formatted = step.format(read(fixture + ".java"), file);
+			assertThat(step.format(formatted, file)).isEqualTo(formatted);
+			setFile(fixture + ".java").toContent(formatted);
+			assertThat(compileAndRun(file, "17", "cleaned", fixture)).isEqualTo(originalValue);
+		}
+
+		@Test
+		void bulkAdditionAndCopyConstructorCleanupsCompose() throws Exception {
+			File file = setFile("NativeCollectionCopy.java").toResource(FIXTURES_ROOT + "NativeCollectionCopy.test");
+			String source = read("NativeCollectionCopy.java").replace("output.addAll(input);", "for (String item : input) { output.add(item); }");
+			FormatterStep step = nativeBuilder("4.40", "8", "cleanup.add_all=true\ncleanup.collection_cloning=true").build();
+			String formatted = step.format(source, file);
+			setFile("NativeCollectionCopy.java").toContent(formatted);
+			assertFile("NativeCollectionCopy.java").sameAsResource(FIXTURES_ROOT + "NativeCollectionCopy.clean");
+			assertThat(step.format(formatted, file)).isEqualTo(formatted);
+			assertThat(compileAndRun(file, "8", "cleaned", "NativeCollectionCopy")).isEqualTo("[a, b]");
+		}
+
+		@ParameterizedTest
+		@MethodSource("cases")
+		void transformsCompilesAndPreservesBehavior(String jdtVersion, String fixture, String javaVersion,
+				String properties, String beforeSuffix, String afterSuffix, String expectedValue) throws Exception {
+			EclipseJdtCleanUpStep.Builder builder = nativeBuilder(jdtVersion, javaVersion, properties);
+			FormatterStep step = builder.build();
+			StepHarness.forStep(step).testResource(FIXTURES_ROOT + fixture + "." + beforeSuffix,
+					FIXTURES_ROOT + fixture + "." + afterSuffix);
+			File file = setFile(fixture + ".java").toResource(FIXTURES_ROOT + fixture + "." + beforeSuffix);
+			assertThat(compileAndRun(file, javaVersion, "original", fixture)).isEqualTo(expectedValue);
+			String formatted = step.format(read(fixture + ".java"), file);
+			setFile(fixture + ".java").toContent(formatted);
+			assertThat(compileAndRun(file, javaVersion, "cleaned", fixture)).isEqualTo(expectedValue);
+		}
+
+		@Test
+		void java10DoesNotIntroduceVarInLambdaParameters() {
+			StepHarness.forStep(nativeBuilder("4.40", "10", "cleanup.use_var=true").build())
+					.testResourceUnaffected(FIXTURES_ROOT + "NativeVarLambda.test");
+		}
+
+		@Test
+		void textBlocksPreserveTheAbsenceOfATrailingNewline() throws Exception {
+			File file = setFile("NativeTextBlock.java").toResource(FIXTURES_ROOT + "NativeTextBlock.test");
+			String before = read("NativeTextBlock.java").replace("\"last\\n\"", "\"last\"");
+			FormatterStep step = nativeBuilder("4.40", "15", "cleanup.stringconcat_to_textblock=true").build();
+			String formatted = step.format(before, file);
+			assertThat(formatted).contains("\"\"\"");
+			assertThat(step.format(formatted, file)).isEqualTo(formatted);
+			setFile("NativeTextBlock.java").toContent(formatted);
+			assertThat(compileAndRun(file, "15", "cleaned", "NativeTextBlock")).isEqualTo("first\n  \"quoted\" \\ path\nlast");
+		}
+
+		@Test
+		void varAndDiamondComposeWithoutAnIdempotenceCycle() {
+			StepHarness.forStep(nativeBuilder("4.40", "10", "cleanup.use_var=true\ncleanup.remove_redundant_type_arguments=true").build())
+					.testResource(FIXTURES_ROOT + "NativeVar.test", FIXTURES_ROOT + "NativeVar.clean");
+		}
+
+		@ParameterizedTest
+		@ValueSource(strings = {"9", "14"})
+		void rejectsActionsAboveTheConfiguredLanguageLevel(String javaVersion) throws Exception {
+			String option = javaVersion.equals("9") ? "cleanup.use_var" : "cleanup.stringconcat_to_textblock";
+			String required = javaVersion.equals("9") ? "10" : "15";
+			String fixture = javaVersion.equals("9") ? "NativeVar" : "NativeTextBlock";
+			File file = setFile(fixture + ".java").toResource(FIXTURES_ROOT + fixture + ".test");
+			String source = read(fixture + ".java");
+			EclipseJdtCleanUpStep.Builder builder = nativeBuilder("4.40", javaVersion, option + "=true");
+			assertThatThrownBy(() -> builder.build().format(source, file))
+					.isInstanceOf(Lint.Has.class).hasMessageContaining(option, "requires Java " + required, "configured " + javaVersion);
+			builder.setStrict(false);
+			assertThat(builder.build().format(source, file)).isEqualTo(source);
+		}
+
+		@Test
+		void varPreservesDeclarationsWhoseStaticTypeMatters() throws Exception {
+			String source = "class Example { void run() { Number n = Integer.valueOf(1); String s = null; int[] a = {1, 2}; int x = 1, y = 2; } }";
+			assertThat(nativeBuilder("4.40", "10", "cleanup.use_var=true").build().format(source, new File("Example.java"))).isEqualTo(source);
+		}
+
+		@Test
+		void differentCatchBodiesAreNotMerged() throws Exception {
+			String source = "class Example { int run() { try { throw new IllegalArgumentException(); } catch (IllegalArgumentException e) { return 1; } catch (IllegalStateException e) { return 2; } } }";
+			assertThat(nativeBuilder("4.40", "8", "cleanup.multi_catch=true").build().format(source, new File("Example.java"))).isEqualTo(source);
+		}
+
+		private EclipseJdtCleanUpStep.Builder nativeBuilder(String version, String javaVersion, String properties) {
+			EclipseJdtCleanUpStep.Builder builder = EclipseJdtCleanUpStep.createBuilder(TestProvisioner.mavenCentral(), TestP2Provisioner.defaultProvisioner());
+			builder.setVersion(version);
+			builder.setJavaVersion(javaVersion);
+			builder.setStrict(true);
+			builder.setPropertyPreferences(List.of(properties));
+			return builder;
+		}
+
+		private Object compileAndRun(File source, String javaVersion, String outputName, String className) throws Exception {
+			File output = newFolder(outputName);
+			ByteArrayOutputStream diagnostics = new ByteArrayOutputStream();
+			int exit = ToolProvider.getSystemJavaCompiler().run(null, diagnostics, diagnostics,
+					"--release", javaVersion, "-encoding", "UTF-8", "-proc:none", "-d", output.getPath(), source.getPath());
+			assertThat(exit).as("javac: %s", diagnostics.toString(StandardCharsets.UTF_8)).isZero();
+			try (URLClassLoader loader = new URLClassLoader(new URL[]{output.toURI().toURL()}, ClassLoader.getPlatformClassLoader())) {
+				return loader.loadClass("example." + className).getMethod("value").invoke(null);
+			}
+		}
 	}
 
 	@Nested

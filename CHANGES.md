@@ -11,6 +11,10 @@ We adhere to the [keepachangelog](https://keepachangelog.com/en/1.0.0/) format (
 
 ## [Unreleased]
 
+### Added
+- Eclipse Clean Up also delegates wrapper-to-primitive conversion, StringBuffer-to-StringBuilder conversion, redundant modifiers/semicolons/super calls, bulk collection additions, collection copying and unnecessary varargs array removal to native Eclipse implementations.
+- Add `EclipseJdtCleanUpStep` for Eclipse Java Clean Up profiles, with configurable source levels and strict diagnostics. Native actions include `var`, text blocks, multi-catch, inferred/diamond type arguments, pattern matching, switch expressions and enhanced for-loops.
+
 ### Fixed
 - `VersionCatalogStep` preserves entries when comments contain unmatched brackets, preserves commas inside quoted strings, and keeps significant line boundaries in multiline entries. ([#3042](https://github.com/diffplug/spotless/pull/3042))
 - `VersionCatalogStep` now reports unfinished entries as lints at their starting line. These fail formatting by default, so upgrading may expose catalog errors that previously caused silent data loss. ([#3042](https://github.com/diffplug/spotless/pull/3042))

@@ -75,6 +75,52 @@ class EclipseCleanUpStepTest extends MavenIntegrationHarness {
 	}
 
 	@Test
+	void nativeModernizationsApplyTogetherAndPassCheck() throws Exception {
+		writePomWithJavaSteps(
+				"<eclipseCleanUp><javaVersion>17</javaVersion><strict>true</strict><settings>",
+				"<cleanup.use_var>true</cleanup.use_var>",
+				"<cleanup.stringconcat_to_textblock>true</cleanup.stringconcat_to_textblock>",
+				"<cleanup.multi_catch>true</cleanup.multi_catch>",
+				"<cleanup.remove_redundant_type_arguments>true</cleanup.remove_redundant_type_arguments>",
+				"</settings></eclipseCleanUp>");
+		String[] names = {"NativeVar", "NativeVarLambda", "NativeTextBlock", "NativeMultiCatch", "NativeDiamond"};
+		for (String name : names) {
+			setFile("src/main/java/example/" + name + ".java").toResource("java/eclipse/cleanup/" + name + ".test");
+		}
+		mavenRunner().withArguments("spotless:apply").runNoError();
+		for (String name : names) {
+			assertFile("src/main/java/example/" + name + ".java").sameAsResource("java/eclipse/cleanup/" + name + ".clean");
+		}
+		mavenRunner().withArguments("spotless:check").runNoError();
+	}
+
+	@Test
+	void nativeSimplificationsApplyTogetherAndPassCheck() throws Exception {
+		writePomWithJavaSteps(
+				"<eclipseCleanUp><javaVersion>8</javaVersion><strict>true</strict><settings>",
+				"<cleanup.primitive_rather_than_wrapper>true</cleanup.primitive_rather_than_wrapper>",
+				"<cleanup.stringbuffer_to_stringbuilder>true</cleanup.stringbuffer_to_stringbuilder>",
+				"<cleanup.stringbuilder_for_local_vars>true</cleanup.stringbuilder_for_local_vars>",
+				"<cleanup.remove_redundant_modifiers>true</cleanup.remove_redundant_modifiers>",
+				"<cleanup.remove_redundant_semicolons>true</cleanup.remove_redundant_semicolons>",
+				"<cleanup.no_super>true</cleanup.no_super>",
+				"<cleanup.add_all>true</cleanup.add_all>",
+				"<cleanup.collection_cloning>true</cleanup.collection_cloning>",
+				"<cleanup.remove_unnecessary_array_creation>true</cleanup.remove_unnecessary_array_creation>",
+				"</settings></eclipseCleanUp>");
+		String[] names = {"NativePrimitive", "NativeStringBuffer", "NativeModifiers", "NativeSemicolons",
+				"NativeSuperCall", "NativeAddAll", "NativeCollectionCopy", "NativeArrayCreation"};
+		for (String name : names) {
+			setFile("src/main/java/example/" + name + ".java").toResource("java/eclipse/cleanup/" + name + ".test");
+		}
+		mavenRunner().withArguments("spotless:apply").runNoError();
+		for (String name : names) {
+			assertFile("src/main/java/example/" + name + ".java").sameAsResource("java/eclipse/cleanup/" + name + ".clean");
+		}
+		mavenRunner().withArguments("spotless:check").runNoError();
+	}
+
+	@Test
 	void headlessRefactoringsApplyAndThenPassCheck() throws Exception {
 		writePomWithJavaSteps(
 				"<eclipseCleanUp><settings>",

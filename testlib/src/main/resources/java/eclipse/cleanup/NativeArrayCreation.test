@@ -1,0 +1,7 @@
+package example;
+
+public class NativeArrayCreation {
+	public static String value() {
+		return String.join(",", new String[] {"a", "b"});
+	}
+}

@@ -1,0 +1,14 @@
+package example;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+public class NativeCollectionCopy {
+	public static String value() {
+		List<String> input = Arrays.asList("a", "b");
+		List<String> output = new ArrayList<>();
+		output.addAll(input);
+		return output.toString();
+	}
+}
