@@ -15,57 +15,32 @@
  */
 package com.diffplug.spotless.extra.glue.jdt.cleanup;
 
-import org.eclipse.jdt.internal.core.JavaElement;
 import org.eclipse.jdt.internal.core.PackageFragment;
 
-/**
- * Headless stand-in for {@link PackageFragment} representing the default (unnamed) package.
- *
- * <p>{@link PackageFragment#PackageFragment(org.eclipse.jdt.internal.core.PackageFragmentRoot, String[])}
- * calls {@code internalIsValidPackageName()} which dereferences the parent
- * {@code PackageFragmentRoot} resource — null in our stub — so we override that hook.
- *
- * <p>The {@link JavaElement#parent} field is wired to {@link StubJavaProject#INSTANCE} via
- * reflection so that {@code getParent()} answers a non-null {@link JavaElement}; downstream
- * Eclipse JDT internals call {@code getParent().hashCode()} on the returned value.
- */
+/** Package of the current source, read from its AST rather than inferred from a filesystem path. */
 final class StubPackageFragment extends PackageFragment {
 
-	static final StubPackageFragment INSTANCE = createInstance("parent");
-
-	private StubPackageFragment() {
-		super(null, new String[0]);
+	StubPackageFragment(String packageName) {
+		this(packageName, StubPackageFragmentRoot.INSTANCE);
 	}
 
-	/**
-	 * Builds a {@link StubPackageFragment} and wires the supplied {@code parentFieldName} on
-	 * {@link JavaElement} via reflection. Package-private and parameterised so unit tests can
-	 * pass an unknown field name to verify the failure path.
-	 */
-	static StubPackageFragment createInstance(String parentFieldName) {
-		StubPackageFragment inst = new StubPackageFragment();
-		try {
-			StubProxies.setField(inst, JavaElement.class, parentFieldName, StubJavaProject.INSTANCE);
-		} catch (ReflectiveOperationException e) {
-			throw new IllegalStateException(
-					"Eclipse JDT API changed: JavaElement#" + parentFieldName + " is missing; please update spotless",
-					e);
-		}
-		return inst;
+	StubPackageFragment(String packageName, StubJavaProject project) {
+		this(packageName, new StubPackageFragmentRoot(project));
 	}
 
+	private StubPackageFragment(String packageName, StubPackageFragmentRoot root) {
+		super(root, packageName.isEmpty() ? new String[0] : packageName.split("\\."));
+	}
+
+	/** The parser supplies the package name; avoid Eclipse's resource-based validation. */
 	@Override
 	protected boolean internalIsValidPackageName() {
 		return true;
 	}
 
+	/** This package contains the source being transformed; no resource lookup is needed. */
 	@Override
-	public String getElementName() {
-		return "";
-	}
-
-	@Override
-	public boolean isDefaultPackage() {
+	public boolean exists() {
 		return true;
 	}
 }

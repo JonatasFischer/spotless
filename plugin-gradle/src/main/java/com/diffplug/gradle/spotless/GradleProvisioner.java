@@ -29,6 +29,7 @@ import org.gradle.api.GradleException;
 import org.gradle.api.Project;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.ConfigurationContainer;
+import org.gradle.api.artifacts.Dependency;
 import org.gradle.api.artifacts.dsl.DependencyHandler;
 import org.gradle.api.attributes.Bundling;
 import org.gradle.api.attributes.Category;
@@ -52,16 +53,16 @@ final class GradleProvisioner {
 
 		public DedupingProvisioner dedupingProvisioner(Project project) {
 			return switch (this) {
-				case ROOT_PROJECT -> new DedupingProvisioner(forProject(project));
-				case ROOT_BUILDSCRIPT -> new DedupingProvisioner(forRootProjectBuildscript(project));
-				default -> throw Unhandled.enumException(this);
+			case ROOT_PROJECT -> new DedupingProvisioner(forProject(project));
+			case ROOT_BUILDSCRIPT -> new DedupingProvisioner(forRootProjectBuildscript(project));
+			default -> throw Unhandled.enumException(this);
 			};
 		}
 
 		public DedupingP2Provisioner dedupingP2Provisioner(Project project) {
 			return switch (this) {
-				case ROOT_PROJECT, ROOT_BUILDSCRIPT -> new DedupingP2Provisioner(P2Provisioner.createDefault());
-				default -> throw Unhandled.enumException(this);
+			case ROOT_PROJECT, ROOT_BUILDSCRIPT -> new DedupingP2Provisioner(P2Provisioner.createDefault(), defaultP2CacheDirectory(project));
+			default -> throw Unhandled.enumException(this);
 			};
 		}
 	}
@@ -122,12 +123,14 @@ final class GradleProvisioner {
 	private static Provisioner forConfigurationContainer(Project project, ConfigurationContainer configurations, DependencyHandler dependencies) {
 		return (withTransitives, mavenCoords) -> {
 			try {
-				Configuration config = configurations.create("spotless"
-						+ new Request(withTransitives, mavenCoords).hashCode());
-				mavenCoords.stream()
+				Request request = new Request(withTransitives, mavenCoords);
+				Dependency[] deps = mavenCoords.stream()
 						.map(dependencies::create)
-						.forEach(config.getDependencies()::add);
-				config.setDescription(mavenCoords.toString());
+						.toArray(Dependency[]::new);
+				// Detached configurations avoid mutating the target configuration container, which Gradle 9 forbids
+				// for the root buildscript container during task execution. See https://github.com/diffplug/spotless/issues/2599.
+				Configuration config = configurations.detachedConfiguration(deps);
+				config.setDescription("Spotless internal dependency resolution for " + request);
 				config.setTransitive(withTransitives);
 				config.setCanBeConsumed(false);
 				config.setVisible(false);
@@ -152,6 +155,10 @@ final class GradleProvisioner {
 	}
 
 	private static final Logger LOGGER = LoggerFactory.getLogger(GradleProvisioner.class);
+
+	static File defaultP2CacheDirectory(Project project) {
+		return new File(project.getGradle().getGradleUserHomeDir(), "caches/p2-data");
+	}
 
 	/** Models a request to the provisioner. */
 	private static class Request {
@@ -196,9 +203,15 @@ final class GradleProvisioner {
 	static class DedupingP2Provisioner implements P2Provisioner {
 		private final Map<P2Request, List<File>> cache = new HashMap<>();
 		private final P2Provisioner p2Provisioner;
+		@Nullable private final File defaultCacheDirectory;
 
 		public DedupingP2Provisioner(P2Provisioner p2Provisioner) {
+			this(p2Provisioner, null);
+		}
+
+		public DedupingP2Provisioner(P2Provisioner p2Provisioner, @Nullable File defaultCacheDirectory) {
 			this.p2Provisioner = p2Provisioner;
+			this.defaultCacheDirectory = defaultCacheDirectory;
 		}
 
 		@Override
@@ -207,33 +220,35 @@ final class GradleProvisioner {
 				Provisioner mavenProvisioner,
 				@Nullable File cacheDirectory) throws IOException {
 
+			File effectiveCacheDirectory = effectiveCacheDirectory(cacheDirectory);
 			P2Request req = new P2Request(
 					List.copyOf(modelWrapper.getP2Repos()),
 					List.copyOf(modelWrapper.getInstallList()),
 					Set.copyOf(modelWrapper.getFilterNames()),
 					List.copyOf(modelWrapper.getPureMaven()),
 					modelWrapper.isUseMavenCentral(),
-					cacheDirectory);
+					effectiveCacheDirectory);
 
 			List<File> result = cache.get(req);
 			if (result != null) {
 				return result;
 			}
 
-			result = p2Provisioner.provisionP2Dependencies(modelWrapper, mavenProvisioner, cacheDirectory);
+			result = p2Provisioner.provisionP2Dependencies(modelWrapper, mavenProvisioner, effectiveCacheDirectory);
 			cache.put(req, List.copyOf(result));
 			return result;
 		}
 
 		/** A child P2Provisioner which retrieves cached elements only. */
 		final P2Provisioner cachedOnly = (modelWrapper, mavenProvisioner, cacheDirectory) -> {
+			File effectiveCacheDirectory = effectiveCacheDirectory(cacheDirectory);
 			P2Request req = new P2Request(
 					List.copyOf(modelWrapper.getP2Repos()),
 					List.copyOf(modelWrapper.getInstallList()),
 					Set.copyOf(modelWrapper.getFilterNames()),
 					List.copyOf(modelWrapper.getPureMaven()),
 					modelWrapper.isUseMavenCentral(),
-					cacheDirectory);
+					effectiveCacheDirectory);
 			List<File> result;
 			synchronized (cache) {
 				result = cache.get(req);
@@ -243,6 +258,10 @@ final class GradleProvisioner {
 			}
 			throw new GradleException("P2 dependencies not predeclared. Add Eclipse formatter configuration to the `spotlessPredeclare` block in the root project.");
 		};
+
+		@Nullable private File effectiveCacheDirectory(@Nullable File cacheDirectory) {
+			return cacheDirectory != null ? cacheDirectory : defaultCacheDirectory;
+		}
 
 		/**
 		 * Cache key capturing all P2Model state that affects query results.

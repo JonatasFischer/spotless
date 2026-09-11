@@ -107,4 +107,12 @@ class EclipseJdtFormatterStepSpecialCaseTest {
 		StepHarness.forStep(builder.build())
 				.testResource("java/eclipse/SortExample.localEnabledTrue.test", "java/eclipse/SortExample.localEnabledTrue.clean");
 	}
+
+	@Test
+	void sort_members_uses_collator() {
+		EclipseJdtFormatterStep.Builder builder = EclipseJdtFormatterStep.createBuilder(TestProvisioner.mavenCentral(), TestP2Provisioner.defaultProvisioner());
+		builder.sortMembersEnabled(true);
+		StepHarness.forStep(builder.build())
+				.testResource("java/eclipse/SortExample.collator.test", "java/eclipse/SortExample.collator.clean");
+	}
 }

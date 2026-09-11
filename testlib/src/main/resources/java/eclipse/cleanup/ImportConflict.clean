@@ -1,0 +1,12 @@
+package example;
+
+public class ImportConflict {
+	static class LocalDate {}
+	public int sum(java.time.LocalDate[] dates) {
+		int total = 0;
+		for (java.time.LocalDate date : dates) {
+			total += date.getDayOfMonth();
+		}
+		return total;
+	}
+}

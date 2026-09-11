@@ -16,7 +16,6 @@
 package com.diffplug.spotless.extra.glue.jdt.cleanup;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.lang.reflect.Method;
 
@@ -114,32 +113,6 @@ class StubProxiesTest {
 		assertThat(p1.hashCode()).isNotEqualTo(p2.hashCode());
 	}
 
-	@Test
-	void setFieldHelperWritesPrivateField() throws Exception {
-		// Use the helper to set a private field on a known target class.
-		Box box = new Box();
-		Method setField = StubProxies.class.getDeclaredMethod(
-				"setField", Object.class, Class.class, String.class, Object.class);
-		setField.setAccessible(true);
-		setField.invoke(null, box, Box.class, "value", "set-via-reflection");
-		assertThat(box.value).isEqualTo("set-via-reflection");
-	}
-
-	@Test
-	void setFieldHelperRaisesOnUnknownField() throws Exception {
-		Box box = new Box();
-		Method setField = StubProxies.class.getDeclaredMethod(
-				"setField", Object.class, Class.class, String.class, Object.class);
-		setField.setAccessible(true);
-		assertThatThrownBy(() -> setField.invoke(null, box, Box.class, "doesNotExist", "x"))
-				.hasCauseInstanceOf(NoSuchFieldException.class);
-	}
-
-	@SuppressWarnings("unused")
-	private static class Box {
-		private String value = "initial";
-	}
-
 	// =========================================================================
 	// defaultReturnValue: must produce a sensible "zero" for every primitive
 	// return type and null for any reference type. Covered exhaustively because
@@ -164,12 +137,12 @@ class StubProxiesTest {
 
 	@Test
 	void defaultShortIsZero() throws Exception {
-		assertThat(defaultReturnValue(short.class)).isEqualTo(0);
+		assertThat(defaultReturnValue(short.class)).isEqualTo((short) 0);
 	}
 
 	@Test
 	void defaultByteIsZero() throws Exception {
-		assertThat(defaultReturnValue(byte.class)).isEqualTo(0);
+		assertThat(defaultReturnValue(byte.class)).isEqualTo((byte) 0);
 	}
 
 	@Test

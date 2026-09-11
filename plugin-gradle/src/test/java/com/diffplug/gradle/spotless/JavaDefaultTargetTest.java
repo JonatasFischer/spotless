@@ -103,6 +103,27 @@ class JavaDefaultTargetTest extends GradleIntegrationHarness {
 	}
 
 	@Test
+	void forbidWildcardImportsWithToggleOffOn() throws IOException {
+		setFile("build.gradle").toLines(
+				"plugins {",
+				"    id 'com.diffplug.spotless'",
+				"}",
+				"repositories { mavenCentral() }",
+				"",
+				"spotless {",
+				"    java {",
+				"        target file('test.java')",
+				"        toggleOffOn()",
+				"        forbidWildcardImports()",
+				"    }",
+				"}");
+
+		setFile("test.java").toResource("java/forbidwildcardimports/JavaCodeWildcardsUnformatted.test");
+		gradleRunner().withArguments("spotlessApply").buildAndFail();
+		assertFile("test.java").sameAsResource("java/forbidwildcardimports/JavaCodeWildcardsFormatted.test");
+	}
+
+	@Test
 	void forbidModuleImports() throws IOException {
 		setFile("build.gradle").toLines(
 				"plugins {",
@@ -153,6 +174,38 @@ class JavaDefaultTargetTest extends GradleIntegrationHarness {
 		setFile("src/main/java/foo/bar/JavaCodeWildcardsUnformatted.java").toResource("java/expandwildcardimports/JavaClassWithWildcardsUnformatted.test");
 		gradleRunner().withArguments("spotlessApply").build();
 		assertFile("src/main/java/foo/bar/JavaCodeWildcardsUnformatted.java").sameAsResource("java/expandwildcardimports/JavaClassWithWildcardsFormatted.test");
+	}
+
+	@Test
+	void expandWildcardImportsIgnoresUnrelatedConfigurations() throws IOException {
+		setFile("build.gradle").toLines(
+				"plugins {",
+				"    id 'java'",
+				"    id 'com.diffplug.spotless'",
+				"}",
+				"",
+				"repositories { mavenCentral() }",
+				"",
+				"configurations {",
+				"    leftover {",
+				"        canBeResolved = true",
+				"        canBeConsumed = false",
+				"    }",
+				"}",
+				"",
+				"dependencies {",
+				"    leftover 'does.not:exist:1.0'",
+				"}",
+				"",
+				"spotless {",
+				"    java {",
+				"        target file('src/main/java/test.java')",
+				"        expandWildcardImports()",
+				"    }",
+				"}");
+		setFile("src/main/java/test.java").toResource("java/googlejavaformat/JavaCodeUnformatted.test");
+		gradleRunner().withArguments("spotlessApply").build();
+		assertFile("src/main/java/test.java").sameAsResource("java/googlejavaformat/JavaCodeUnformatted.test");
 	}
 
 	/**

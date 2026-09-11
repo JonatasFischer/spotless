@@ -17,58 +17,27 @@ package com.diffplug.spotless.extra.glue.jdt.cleanup;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.function.UnaryOperator;
 
-import org.eclipse.core.resources.IProject;
 import org.eclipse.core.runtime.preferences.IEclipsePreferences;
 import org.eclipse.jdt.core.IModuleDescription;
 import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.internal.core.JavaProject;
 
+import com.diffplug.spotless.extra.glue.jdt.SuppressFBWarnings;
+
 /**
- * Headless stand-in for {@link JavaProject}. Created once as a singleton and shared across every
- * cleanup invocation.
- *
- * <p>The Eclipse JDT internals reach for the {@code project} field directly (not via
- * {@link #getProject()}), so we set it via reflection in the static factory; this lets
- * {@link org.eclipse.jdt.internal.core.JavaElement#hashCode()} (which is final and dereferences
- * {@code this.project}) succeed for our stub.
+ * Headless Java project with immutable, per-instance compiler options. Different source levels
+ * can coexist in the same classloader without mutating the Eclipse-wide defaults.
  */
+@SuppressFBWarnings(value = "EQ_DOESNT_OVERRIDE_EQUALS", justification = "JDT project identity is its IProject resource; each instance owns a distinct resource")
 final class StubJavaProject extends JavaProject {
 
-	/** Stub IProject is initialised first because INSTANCE creation depends on it. */
-	private static final IProject STUB_PROJECT = StubProxies.createStubProject();
-	static final StubJavaProject INSTANCE = createInstance("project");
+	static final StubJavaProject INSTANCE = new StubJavaProject(CleanUpConstants.DEFAULT_COMPILER_OPTIONS);
+	private final Map<String, String> compilerOptions;
 
-	/**
-	 * Test-only seam: swappable function used by {@link #getOption(String, boolean)} when the
-	 * caller asks for an inherited value. Defaults to {@link JavaCore#getOption(String)}; tests
-	 * can replace it with a deterministic lookup so PIT mutants on the inheritance ternary can
-	 * be killed without depending on a fully initialised OSGi runtime.
-	 */
-	@SuppressWarnings("CanBeFinal")
-	static volatile UnaryOperator<String> JAVA_CORE_LOOKUP = JavaCore::getOption;
-
-	private StubJavaProject() {
-		super(null, null);
-	}
-
-	/**
-	 * Builds a {@link StubJavaProject} and wires its {@code projectFieldName} field on
-	 * {@link JavaProject} via reflection. Package-private and parameterised so unit tests can
-	 * pass an unknown field name to verify the failure path; production code always calls it
-	 * with {@code "project"}.
-	 */
-	static StubJavaProject createInstance(String projectFieldName) {
-		StubJavaProject inst = new StubJavaProject();
-		try {
-			StubProxies.setField(inst, JavaProject.class, projectFieldName, STUB_PROJECT);
-		} catch (ReflectiveOperationException e) {
-			throw new IllegalStateException(
-					"Eclipse JDT API changed: JavaProject#" + projectFieldName + " is missing; please update spotless",
-					e);
-		}
-		return inst;
+	StubJavaProject(Map<String, String> compilerOptions) {
+		super(StubProxies.createStubProject(), null);
+		this.compilerOptions = Map.copyOf(compilerOptions);
 	}
 
 	/**
@@ -80,28 +49,22 @@ final class StubJavaProject extends JavaProject {
 	@Override
 	public Map<String, String> getOptions(boolean inheritJavaCoreOptions) {
 		if (!inheritJavaCoreOptions) {
-			return CleanUpConstants.DEFAULT_COMPILER_OPTIONS;
+			return compilerOptions;
 		}
 		Map<String, String> merged = new HashMap<>(JavaCore.getOptions());
-		merged.putAll(CleanUpConstants.DEFAULT_COMPILER_OPTIONS);
+		merged.putAll(compilerOptions);
 		return merged;
 	}
 
-	/**
-	 * Always answer Java 17 source level so cleanups gated on
-	 * {@code JavaModelUtil.is16OrHigher(project)} (pattern matching, switch expressions, ...) are
-	 * eligible. Without this override the call falls back to the workbench-wide default (often
-	 * "1.8") and modern transformations silently no-op.
-	 */
+	/** Honor the configured source level in JDT's language-version checks. */
 	@Override
 	public String getOption(String optionName, boolean inheritJavaCoreOptions) {
-		if (JavaCore.COMPILER_SOURCE.equals(optionName)
-				|| JavaCore.COMPILER_COMPLIANCE.equals(optionName)
-				|| JavaCore.COMPILER_CODEGEN_TARGET_PLATFORM.equals(optionName)) {
-			return CleanUpConstants.JAVA_LEVEL;
+		String option = compilerOptions.get(optionName);
+		if (option != null) {
+			return option;
 		}
 		if (inheritJavaCoreOptions) {
-			return JAVA_CORE_LOOKUP.apply(optionName);
+			return JavaCore.getOptions().get(optionName);
 		}
 		return null;
 	}
@@ -116,17 +79,9 @@ final class StubJavaProject extends JavaProject {
 		return null;
 	}
 
-	@Override
-	public IProject getProject() {
-		return STUB_PROJECT;
-	}
-
 	/**
-	 * The default impl dereferences the protected {@code project} field via
-	 * {@code hasJavaNature(project)}; the field is null even though {@link #getProject()} returns
-	 * a stub, so cleanups like {@code PatternMatchingForInstanceofCleanUpCore} NPE while looking
-	 * up Java source compliance. Returning null lets the caller fall back to
-	 * {@link JavaCore#getOption(String)} workbench defaults.
+	 * Preferences are supplied by getOptions/getOption. There is no workspace-backed preferences
+	 * node for this in-memory project.
 	 */
 	@Override
 	public IEclipsePreferences getEclipsePreferences() {

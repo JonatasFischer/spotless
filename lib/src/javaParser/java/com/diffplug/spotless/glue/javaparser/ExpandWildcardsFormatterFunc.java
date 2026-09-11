@@ -70,9 +70,9 @@ public class ExpandWildcardsFormatterFunc implements FormatterFunc.NeedsFile {
 		this.parser = new JavaParser();
 
 		CombinedTypeSolver combinedTypeSolver = new CombinedTypeSolver();
-		combinedTypeSolver.add(new ReflectionTypeSolver());
+		combinedTypeSolver.add(new ReflectionTypeSolver(ReflectionTypeSolver.JCL_ONLY));
 		for (File element : typeSolverClasspath) {
-			if (element.isFile()) {
+			if (element.isFile() && element.getName().endsWith(".jar")) {
 				combinedTypeSolver.add(new JarTypeSolver(element));
 			} else if (element.isDirectory()) {
 				combinedTypeSolver.add(new JavaParserTypeSolver(element));

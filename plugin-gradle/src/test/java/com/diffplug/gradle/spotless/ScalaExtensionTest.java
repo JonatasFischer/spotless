@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2021 DiffPlug
+ * Copyright 2016-2026 DiffPlug
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,25 @@ import java.io.IOException;
 import org.junit.jupiter.api.Test;
 
 class ScalaExtensionTest extends GradleIntegrationHarness {
+	@Test
+	void versionFromConfig() throws IOException {
+		setFile("build.gradle").toLines(
+				"plugins {",
+				"    id 'com.diffplug.spotless'",
+				"}",
+				"repositories { mavenCentral() }",
+				"apply plugin: 'scala'",
+				"spotless {",
+				"    scala {",
+				"        scalafmt().configFile('scalafmt.conf')",
+				"    }",
+				"}");
+		setFile("scalafmt.conf").toResource("scala/scalafmt/scalafmt_newer.conf");
+		setFile("src/main/scala/basic.scala").toResource("scala/scalafmt/basic.dirty");
+		gradleRunner().withArguments("spotlessApply").build();
+		assertFile("src/main/scala/basic.scala").sameAsResource("scala/scalafmt/basic.cleanWithCustomConf_3.0.0");
+	}
+
 	@Test
 	void integration() throws IOException {
 		setFile("build.gradle").toLines(

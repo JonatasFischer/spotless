@@ -43,7 +43,7 @@ import com.diffplug.spotless.maven.FormatterStepFactory;
  *   <settings>
  *     <cleanup.make_local_variable_final>true</cleanup.make_local_variable_final>
  *   </settings>
- *   <version>4.39</version>
+ *   <version>4.40</version>
  * </eclipseCleanUp>
  * }</pre>
  *
@@ -69,6 +69,14 @@ public class EclipseCleanUp implements FormatterStepFactory {
 	@Parameter
 	private String version;
 
+	/** Java language level of the source, independently of the JVM running Maven. */
+	@Parameter
+	private String javaVersion = "17";
+
+	/** Fail on ignored actions instead of warning and continuing. */
+	@Parameter
+	private boolean strict;
+
 	/** P2 mirrors used when resolving the Eclipse JDT bundles. */
 	@Parameter
 	private List<P2Mirror> p2Mirrors = new ArrayList<>();
@@ -80,16 +88,13 @@ public class EclipseCleanUp implements FormatterStepFactory {
 		return configureBuilder(stepConfig).build();
 	}
 
-	/**
-	 * Configures and returns the underlying {@link EquoBasedStepBuilder} without calling
-	 * {@code build()}. Package-private so unit tests can inspect every {@code setX} side effect
-	 * (kills PIT mutants on the {@code if (...)} guards and the {@code builder.setX(...)} calls)
-	 * without paying the P2 provisioning cost a real {@code build()} would incur.
-	 */
+	/** Configures file preferences first, followed by inline overrides. */
 	EquoBasedStepBuilder configureBuilder(FormatterStepConfig stepConfig) {
 		EclipseJdtCleanUpStep.Builder builder = EclipseJdtCleanUpStep.createBuilder(
 				stepConfig.getProvisioner(), stepConfig.getP2Provisioner());
 		builder.setVersion(version != null ? version : EclipseJdtCleanUpStep.defaultVersion());
+		builder.setJavaVersion(javaVersion);
+		builder.setStrict(strict);
 		if (file != null) {
 			File settingsFile = stepConfig.getFileLocator().locateFile(file);
 			builder.setPreferences(Collections.singletonList(settingsFile));
@@ -98,9 +103,6 @@ public class EclipseCleanUp implements FormatterStepFactory {
 			builder.setPropertyPreferences(toPropertyLines(settings));
 		}
 		builder.setP2Mirrors(p2Mirrors);
-		// builder.setCacheDirectory(null) is a no-op (the field default is also null), so the
-		// previous `if (cacheDirectory != null)` guard produced an equivalent PIT mutant. Drop
-		// the guard — calling unconditionally is identical in effect.
 		builder.setCacheDirectory(cacheDirectory);
 		return builder;
 	}
@@ -117,8 +119,6 @@ public class EclipseCleanUp implements FormatterStepFactory {
 	 * <p>Package-private for direct unit tests.
 	 */
 	static List<String> toPropertyLines(Map<String, String> settings) {
-		// Default StringBuilder capacity is fine — the optimisation didn't actually matter and
-		// the size hint produced an equivalent PIT mutant we couldn't kill.
 		StringBuilder sb = new StringBuilder();
 		for (Map.Entry<String, String> entry : settings.entrySet()) {
 			sb.append(entry.getKey()).append('=').append(entry.getValue()).append('\n');

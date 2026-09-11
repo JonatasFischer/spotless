@@ -16,64 +16,38 @@
 package com.diffplug.spotless.extra.glue.jdt.cleanup;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.lang.reflect.Method;
+import org.eclipse.jdt.core.IJavaElement;
+import org.eclipse.jdt.core.IPackageFragmentRoot;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
-import org.junit.jupiter.api.Test;
-
-/** Direct unit tests for {@link StubPackageFragment}. */
 class StubPackageFragmentTest {
 
-	@Test
-	void instanceIsAccessibleAndStable() {
-		StubPackageFragment a = StubPackageFragment.INSTANCE;
-		StubPackageFragment b = StubPackageFragment.INSTANCE;
-		assertThat(a).isNotNull();
-		assertThat(a).isSameAs(b);
+	@ParameterizedTest
+	@ValueSource(strings = {"", "test", "com.example.application"})
+	void representsAnExistingSourcePackage(String name) {
+		StubPackageFragment fragment = new StubPackageFragment(name);
+		assertThat(fragment.getElementName()).isEqualTo(name);
+		assertThat(fragment.isDefaultPackage()).isEqualTo(name.isEmpty());
+		assertThat(fragment.exists()).isTrue();
+		assertThat(fragment.internalIsValidPackageName()).isTrue();
+		assertThat(fragment.getAncestor(IJavaElement.PACKAGE_FRAGMENT_ROOT)).isSameAs(StubPackageFragmentRoot.INSTANCE);
+		assertThat(fragment.getJavaProject()).isSameAs(StubJavaProject.INSTANCE);
+		assertThat(fragment).isEqualTo(new StubPackageFragment(name));
+		assertThat(fragment.hashCode()).isEqualTo(new StubPackageFragment(name).hashCode());
 	}
 
-	@Test
-	void elementNameIsEmptyForDefaultPackage() {
-		assertThat(StubPackageFragment.INSTANCE.getElementName()).isEmpty();
-	}
-
-	@Test
-	void isDefaultPackageIsTrue() {
-		assertThat(StubPackageFragment.INSTANCE.isDefaultPackage()).isTrue();
-	}
-
-	@Test
-	void internalIsValidPackageNameIsTrue() throws Exception {
-		// Method is protected; reach it via reflection.
-		Method m = StubPackageFragment.class.getDeclaredMethod("internalIsValidPackageName");
-		m.setAccessible(true);
-		assertThat((boolean) m.invoke(StubPackageFragment.INSTANCE)).isTrue();
-	}
-
-	@Test
-	void parentIsWiredToStubJavaProject() {
-		// JavaElement#getParent reads the protected `parent` field that we set via reflection in
-		// the static factory; verify the wiring took effect.
-		assertThat(StubPackageFragment.INSTANCE.getParent()).isSameAs(StubJavaProject.INSTANCE);
-	}
-
-	@Test
-	void createInstanceThrowsForUnknownParentField() {
-		// Drives the catch block that translates a JDT API rename into a clear IllegalStateException.
-		assertThatThrownBy(() -> StubPackageFragment.createInstance("definitelyNotAField"))
-				.isInstanceOf(IllegalStateException.class)
-				.hasMessageContaining("JavaElement#definitelyNotAField")
-				.hasCauseInstanceOf(NoSuchFieldException.class);
-	}
-
-	@Test
-	void createInstanceWithRealFieldNameReturnsAWiredFragment() {
-		// Success path: kills the NullReturnValsMutator on `return inst` (which would otherwise
-		// survive because the existing tests only look at the singleton built during static init).
-		StubPackageFragment built = StubPackageFragment.createInstance("parent");
-		assertThat(built).isNotNull();
-		// The parent field must point at the stub JavaProject.
-		assertThat(built.getParent()).isSameAs(StubJavaProject.INSTANCE);
+	@ParameterizedTest
+	@ValueSource(strings = {"", "com.example"})
+	void sourceRootHasAStableResourceAndPath(String name) {
+		StubPackageFragment fragment = new StubPackageFragment(name);
+		StubPackageFragmentRoot root = (StubPackageFragmentRoot) fragment.getParent();
+		assertThat(root.getKind()).isEqualTo(IPackageFragmentRoot.K_SOURCE);
+		assertThat(root.isArchive()).isFalse();
+		assertThat(root.exists()).isTrue();
+		assertThat(root.getResource()).isSameAs(StubJavaProject.INSTANCE.getProject());
+		assertThat(root.getPath().toPortableString()).isEqualTo("/" + CleanUpConstants.STUB_PROJECT_NAME);
+		assertThat(fragment.getPath()).isEqualTo(root.getPath().append(name.replace('.', '/')));
 	}
 }

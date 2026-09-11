@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2023 DiffPlug
+ * Copyright 2016-2026 DiffPlug
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,22 +35,20 @@ public class ScalaExtension extends FormatExtension implements JvmLang {
 	}
 
 	public ScalaFmtConfig scalafmt() {
-		return scalafmt(ScalaFmtStep.defaultVersion());
+		return new ScalaFmtConfig(null);
 	}
 
 	public ScalaFmtConfig scalafmt(String version) {
-		return new ScalaFmtConfig(version);
+		return new ScalaFmtConfig(Objects.requireNonNull(version));
 	}
 
 	public class ScalaFmtConfig {
-		final String version;
-		@Nullable
-		String scalaMajorVersion;
-		@Nullable
-		Object configFile;
+		@Nullable final String version;
+		@Nullable String scalaMajorVersion;
+		@Nullable Object configFile;
 
-		ScalaFmtConfig(String version) {
-			this.version = Objects.requireNonNull(version);
+		ScalaFmtConfig(@Nullable String version) {
+			this.version = version;
 			addStep(createStep());
 		}
 

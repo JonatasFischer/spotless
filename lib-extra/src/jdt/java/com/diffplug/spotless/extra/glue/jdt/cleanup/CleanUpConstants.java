@@ -23,18 +23,18 @@ import org.eclipse.jdt.core.JavaCore;
 /**
  * Centralised constants used across the headless Eclipse JDT clean-up implementation.
  *
- * <p>Kept package-private; only {@link com.diffplug.spotless.extra.glue.jdt.EclipseJdtCleanUpImpl}
- * and its companion stub classes consume these values.
+ * <p>Used by {@link com.diffplug.spotless.extra.glue.jdt.EclipseJdtCleanUpImpl}
+ * and its companion source-model classes inside the isolated JDT classloader.
  */
 public final class CleanUpConstants {
 
 	private CleanUpConstants() {}
 
 	// -------------------------------------------------------------------------
-	// Java source compliance — every cleanup AST is parsed at this level.
+	// Java source compliance defaults.
 	// -------------------------------------------------------------------------
 
-	/** The Java source/target/compliance level the cleanup parser uses. */
+	/** Default Java source/target/compliance level when javaVersion is omitted. */
 	public static final String JAVA_LEVEL = "17";
 
 	/** Compiler options seeded for every cleanup AST. Immutable. */
@@ -42,6 +42,20 @@ public final class CleanUpConstants {
 			JavaCore.COMPILER_SOURCE, JAVA_LEVEL,
 			JavaCore.COMPILER_COMPLIANCE, JAVA_LEVEL,
 			JavaCore.COMPILER_CODEGEN_TARGET_PLATFORM, JAVA_LEVEL);
+
+	/** Validate against the selected JDT's capabilities rather than the host JVM's version. */
+	public static Map<String, String> compilerOptions(String version) {
+		String jdtVersion = "8".equals(version) ? "1.8" : version;
+		if (!JavaCore.isJavaSourceVersionSupportedByCompiler(jdtVersion)) {
+			throw new IllegalArgumentException("Java source version " + version
+					+ " is not supported by the selected Eclipse JDT; supported versions: "
+					+ JavaCore.getAllJavaSourceVersionsSupportedByCompiler());
+		}
+		return Map.of(
+				JavaCore.COMPILER_SOURCE, jdtVersion,
+				JavaCore.COMPILER_COMPLIANCE, jdtVersion,
+				JavaCore.COMPILER_CODEGEN_TARGET_PLATFORM, jdtVersion);
+	}
 
 	// -------------------------------------------------------------------------
 	// Synthetic identity values used by the stub Eclipse model — never user-visible.

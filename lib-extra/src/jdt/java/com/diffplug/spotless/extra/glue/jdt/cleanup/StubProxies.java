@@ -15,13 +15,14 @@
  */
 package com.diffplug.spotless.extra.glue.jdt.cleanup;
 
-import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
 import java.util.Map;
 
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IProject;
+import org.eclipse.core.resources.IResource;
+import org.eclipse.core.runtime.Path;
 
 /**
  * Helpers that build {@link Proxy}-based stub instances of Eclipse Resources interfaces
@@ -40,8 +41,12 @@ final class StubProxies {
 	private static Object defaultReturnValue(Class<?> returnType) {
 		if (returnType == boolean.class)
 			return Boolean.FALSE;
-		if (returnType == int.class || returnType == short.class || returnType == byte.class)
+		if (returnType == int.class)
 			return 0;
+		if (returnType == short.class)
+			return (short) 0;
+		if (returnType == byte.class)
+			return (byte) 0;
 		if (returnType == long.class)
 			return 0L;
 		if (returnType == double.class)
@@ -64,16 +69,16 @@ final class StubProxies {
 			if (override != null) {
 				return override;
 			}
-			switch (method.getName()) {
-			case "hashCode":
+			if (method.getName().equals("hashCode")) {
 				return System.identityHashCode(proxy);
-			case "equals":
-				return proxy == args[0];
-			case "toString":
-				return label;
-			default:
-				return defaultReturnValue(method.getReturnType());
 			}
+			if (method.getName().equals("equals")) {
+				return proxy == args[0];
+			}
+			if (method.getName().equals("toString")) {
+				return label;
+			}
+			return defaultReturnValue(method.getReturnType());
 		};
 	}
 
@@ -103,6 +108,8 @@ final class StubProxies {
 	static IProject createStubProject() {
 		Map<String, Object> overrides = Map.of(
 				"getName", CleanUpConstants.STUB_PROJECT_NAME,
+				"getFullPath", new Path("/" + CleanUpConstants.STUB_PROJECT_NAME),
+				"getType", IResource.PROJECT,
 				"exists", Boolean.TRUE,
 				"isAccessible", Boolean.TRUE,
 				"isOpen", Boolean.TRUE);
@@ -110,16 +117,5 @@ final class StubProxies {
 				IProject.class.getClassLoader(),
 				new Class<?>[]{IProject.class},
 				buildHandler(overrides, "StubIProject[" + CleanUpConstants.STUB_PROJECT_NAME + "]"));
-	}
-
-	/**
-	 * Reflectively writes {@code value} to {@code declaringClass#fieldName} on {@code target}.
-	 * Used by the stub Eclipse-model classes whose own constructors do not let us pass the
-	 * required parent references in.
-	 */
-	static void setField(Object target, Class<?> declaringClass, String fieldName, Object value) throws ReflectiveOperationException {
-		Field f = declaringClass.getDeclaredField(fieldName);
-		f.setAccessible(true);
-		f.set(target, value);
 	}
 }

@@ -1,0 +1,13 @@
+package example;
+
+import java.time.LocalDate;
+
+public class ImportLoop {
+	public int sum(java.time.LocalDate[] dates) {
+		int total = 0;
+		for (LocalDate date : dates) {
+			total += date.getDayOfMonth();
+		}
+		return total;
+	}
+}

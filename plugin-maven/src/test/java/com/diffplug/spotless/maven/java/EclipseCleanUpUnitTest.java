@@ -74,6 +74,7 @@ class EclipseCleanUpUnitTest {
 				TestProvisioner.mavenCentral(),
 				/* p2Provisioner */ (modelWrapper, mavenProv, cacheDir) -> List.of(),
 				fileLocator,
+				Optional.empty(),
 				Optional.empty());
 	}
 
@@ -136,13 +137,27 @@ class EclipseCleanUpUnitTest {
 	}
 
 	@Test
+	void configuresJavaSourceLevelAndStrictnessIndependentlyOfJdtVersion() throws Exception {
+		EclipseCleanUp mojo = new EclipseCleanUp();
+		setField(mojo, "javaVersion", "21");
+		setField(mojo, "strict", true);
+		EquoBasedStepBuilder builder = mojo.configureBuilder(stepConfig());
+		var method = EquoBasedStepBuilder.class.getDeclaredMethod("stepProperties");
+		method.setAccessible(true);
+		@SuppressWarnings("unchecked")
+		Map<String, String> properties = (Map<String, String>) method.invoke(builder);
+		assertThat(properties).containsEntry("sp_cleanup.java_version", "21").containsEntry("sp_cleanup.strict", "true");
+		assertThat(reflectBuilderField(builder, "formatterVersion")).isEqualTo(EclipseJdtCleanUpStep.defaultVersion());
+	}
+
+	@Test
 	void configureBuilderHonoursExplicitVersionField() throws Exception {
 		EclipseCleanUp mojo = new EclipseCleanUp();
 		// Use a non-default version so the mutant 'version != null ? version : default'
 		// (EQUAL_ELSE) produces an observably different result than the original ternary.
-		setField(mojo, "version", "4.40");
+		setField(mojo, "version", "4.39");
 		EquoBasedStepBuilder builder = mojo.configureBuilder(stepConfig());
-		assertThat(reflectBuilderField(builder, "formatterVersion")).isEqualTo("4.40");
+		assertThat(reflectBuilderField(builder, "formatterVersion")).isEqualTo("4.39");
 	}
 
 	@Test

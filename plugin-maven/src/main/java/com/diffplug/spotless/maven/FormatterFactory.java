@@ -175,17 +175,19 @@ public abstract class FormatterFactory {
 	}
 
 	Optional<String> ratchetFrom(FormatterConfig config) {
-		if (RATCHETFROM_NOT_SET_AT_FORMAT_LEVEL.equals(ratchetFrom)) {
-			return config.getRatchetFrom();
-		} else if (RATCHETFROM_NONE.equals(ratchetFrom)) {
-			return Optional.empty();
-		} else {
-			return Optional.ofNullable(ratchetFrom);
-		}
+		return config.getUserRatchetFrom()
+				.or(this::optionalRatchetFrom)
+				.or(config::getRatchetFrom)
+				.filter(ratchet -> !RATCHETFROM_NONE.equals(ratchet));
+	}
+
+	private Optional<String> optionalRatchetFrom() {
+		return Optional.ofNullable(ratchetFrom)
+				.filter(ratchet -> !RATCHETFROM_NOT_SET_AT_FORMAT_LEVEL.equals(ratchet));
 	}
 
 	private FormatterStepConfig stepConfig(Charset encoding, FormatterConfig config) {
-		return new FormatterStepConfig(encoding, licenseHeaderDelimiter(), ratchetFrom(config), config.getProvisioner(), config.getP2Provisioner(), config.getFileLocator(), config.getSpotlessSetLicenseHeaderYearsFromGitHistory());
+		return new FormatterStepConfig(encoding, licenseHeaderDelimiter(), ratchetFrom(config), config.getProvisioner(), config.getP2Provisioner(), config.getFileLocator(), config.getSpotlessSetLicenseHeaderYearsFromGitHistory(), config.getProjectClasspathSupplier());
 	}
 
 	private static List<FormatterStepFactory> gatherStepFactories(List<FormatterStepFactory> allGlobal, List<FormatterStepFactory> allConfigured) {

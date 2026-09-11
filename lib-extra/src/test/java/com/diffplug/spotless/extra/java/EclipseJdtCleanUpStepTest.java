@@ -24,12 +24,14 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.List;
 
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import com.diffplug.spotless.FormatterStep;
+import com.diffplug.spotless.Lint;
 import com.diffplug.spotless.ResourceHarness;
 import com.diffplug.spotless.StepHarness;
 import com.diffplug.spotless.TestP2Provisioner;
@@ -117,6 +119,59 @@ class EclipseJdtCleanUpStepTest extends ResourceHarness {
 	class Guarantees {
 
 		@Test
+		void strictUnsupportedProfileIsReportedAsASpotlessLint() {
+			EclipseJdtCleanUpStep.Builder builder = EclipseJdtCleanUpStep.createBuilder(TestProvisioner.mavenCentral(), TestP2Provisioner.defaultProvisioner());
+			builder.setStrict(true);
+			builder.setPropertyPreferences(List.of("cleanup.no_such_action=true"));
+			assertThatThrownBy(() -> builder.build().format("class Example {}", new File("Example.java")))
+					.isInstanceOf(Lint.Has.class).hasMessageContaining("cleanup.no_such_action", "not implemented", "Example.java");
+		}
+
+		@Test
+		void strictModeRejectsActionsAboveTheConfiguredJavaLevel() {
+			EclipseJdtCleanUpStep.Builder builder = EclipseJdtCleanUpStep.createBuilder(TestProvisioner.mavenCentral(), TestP2Provisioner.defaultProvisioner());
+			builder.setJavaVersion("8");
+			builder.setStrict(true);
+			builder.setPropertyPreferences(List.of("cleanup.instanceof=true"));
+			assertThatThrownBy(() -> builder.build().format("class Example {}", new File("Example.java")))
+					.isInstanceOf(Lint.Has.class).hasMessageContaining("cleanup.instanceof", "requires Java 16", "configured 8");
+		}
+
+		@Test
+		void unsupportedJavaVersionIsReportedBeforeFormatting() {
+			EclipseJdtCleanUpStep.Builder builder = EclipseJdtCleanUpStep.createBuilder(TestProvisioner.mavenCentral(), TestP2Provisioner.defaultProvisioner());
+			builder.setJavaVersion("99");
+			assertThatThrownBy(() -> builder.build().format("class Example {}", new File("Example.java")))
+					.isInstanceOf(Lint.Has.class).hasMessageContaining("Java source version 99", "not supported");
+		}
+
+		@Test
+		void sourceVersionAndStrictModeParticipateInStepEquality() {
+			EclipseJdtCleanUpStep.Builder builder = EclipseJdtCleanUpStep.createBuilder(TestProvisioner.mavenCentral(), TestP2Provisioner.defaultProvisioner());
+			FormatterStep defaults = builder.build();
+			builder.setJavaVersion("21");
+			FormatterStep java21 = builder.build();
+			assertThat(java21).isNotEqualTo(defaults);
+			builder.setStrict(true);
+			assertThat(builder.build()).isNotEqualTo(java21);
+			builder.setJavaVersion("17");
+			builder.setStrict(false);
+			assertThat(builder.build()).isEqualTo(defaults);
+		}
+
+		@Test
+		void sourceVersionValidationAndJava8Alias() {
+			EclipseJdtCleanUpStep.Builder builder = EclipseJdtCleanUpStep.createBuilder(TestProvisioner.mavenCentral(), TestP2Provisioner.defaultProvisioner());
+			for (String value : new String[]{null, "", "latest", "7", "21.0", " 21", "021"}) {
+				assertThatThrownBy(() -> builder.setJavaVersion(value)).isInstanceOf(IllegalArgumentException.class);
+			}
+			builder.setJavaVersion("1.8");
+			FormatterStep alias = builder.build();
+			builder.setJavaVersion("8");
+			assertThat(builder.build()).isEqualTo(alias);
+		}
+
+		@Test
 		@DisplayName("A profile with no cleanups enabled leaves the source unchanged")
 		void emptyProfileIsNoOp() {
 			StepHarness.forStep(buildStep(FIXTURES_ROOT + "Empty.xml"))
@@ -167,7 +222,7 @@ class EclipseJdtCleanUpStepTest extends ResourceHarness {
 			EquoBasedStepBuilder builder = createBuilder();
 			assertThatThrownBy(() -> builder.setVersion("latest"))
 					.isInstanceOf(IllegalArgumentException.class)
-					.hasMessageContaining("4.39");
+					.hasMessageContaining(EclipseJdtCleanUpStep.defaultVersion());
 			assertThatThrownBy(() -> builder.setVersion(""))
 					.isInstanceOf(IllegalArgumentException.class);
 			assertThatThrownBy(() -> builder.setVersion("3.99"))
@@ -219,7 +274,7 @@ class EclipseJdtCleanUpStepTest extends ResourceHarness {
 		@DisplayName("defaultVersion() returns the JVM-recommended Eclipse Platform version")
 		void defaultVersionMatchesRecommended() {
 			String v = EclipseJdtCleanUpStep.defaultVersion();
-			assertThat(v).as("default version is published as the recommended formatter version").isEqualTo("4.39");
+			assertThat(v).as("default version is published as the recommended formatter version").isEqualTo("4.40");
 		}
 
 		@Test
@@ -281,10 +336,7 @@ class EclipseJdtCleanUpStepTest extends ResourceHarness {
 		void validateVersionRejectsNonEclipseVersions() throws Exception {
 			Method m = EclipseJdtCleanUpStep.class.getDeclaredMethod("validateVersion", String.class);
 			m.setAccessible(true);
-			// Note: "4.39.0.0" intentionally NOT in this list — normaliseVersion strips the
-			// trailing ".0" to "4.39.0" which IS a valid 4.x.y, so we accept it. Mismatched
-			// inputs that should fail are major-version mismatches, missing minor, or non-numeric.
-			for (String bad : new String[]{"latest", "3.99", "5.0", "4", "4.x", "abc"}) {
+			for (String bad : new String[]{"latest", "3.99", "5.0", "4", "4.x", "abc", "4.39.1", "4.39.0.0", "4.0.39"}) {
 				assertThatThrownBy(() -> m.invoke(null, bad))
 						.as("validateVersion('%s') must throw IAE", bad)
 						.isInstanceOf(InvocationTargetException.class)
@@ -294,7 +346,7 @@ class EclipseJdtCleanUpStepTest extends ResourceHarness {
 		}
 
 		@Test
-		@DisplayName("validateVersion accepts canonical 4.x and 4.x.y")
+		@DisplayName("validateVersion accepts canonical 4.x and 4.x.0")
 		void validateVersionAcceptsCanonicalForms() throws Exception {
 			Method m = EclipseJdtCleanUpStep.class.getDeclaredMethod("validateVersion", String.class);
 			m.setAccessible(true);
@@ -302,7 +354,7 @@ class EclipseJdtCleanUpStepTest extends ResourceHarness {
 			m.invoke(null, "4.39");
 			m.invoke(null, "4.39.0");
 			m.invoke(null, "4.40");
-			m.invoke(null, "4.39.1");
+			m.invoke(null, "4.40.0");
 		}
 
 		@Test
@@ -329,12 +381,12 @@ class EclipseJdtCleanUpStepTest extends ResourceHarness {
 			EquoBasedStepBuilder builder = createBuilder();
 			// Use a non-default version so the mutant 'remove super.setVersion call' produces a
 			// different stored value (default) than the original (our explicit version).
-			builder.setVersion("4.40");
+			builder.setVersion("4.39");
 			Field versionField = EquoBasedStepBuilder.class.getDeclaredField("formatterVersion");
 			versionField.setAccessible(true);
 			Object value = versionField.get(builder);
-			assertThat(value).as("super.setVersion must store the supplied version 4.40")
-					.isEqualTo("4.40");
+			assertThat(value).as("super.setVersion must store the supplied version 4.39")
+					.isEqualTo("4.39");
 		}
 
 		@Test
@@ -356,20 +408,49 @@ class EclipseJdtCleanUpStepTest extends ResourceHarness {
 		// an environment-equivalent mutant.
 	}
 
-	// =========================================================================
-	// Cleanups whose fix passes through CompilationUnitRewrite.attachChange ->
-	// ImportRewriteAnalyzer, which traverses the IPackageFragmentRoot hierarchy
-	// (calls isArchive(), root resource, etc.). Stubbing these out without a real
-	// workspace runs into a chain of NPEs that goes deeper than is practical to
-	// fake. Tracked as a known limitation in EclipseJdtCleanUpStep's Javadoc.
-	// =========================================================================
-
 	@Nested
-	@DisplayName("Cleanups requiring a real workspace (currently disabled)")
-	class RequiresWorkspace {
+	@DisplayName("Cleanups using the headless source model")
+	class SourceModel {
+
+		@ParameterizedTest
+		@ValueSource(strings = {"", "com.example.deep"})
+		void enhancedForDoesNotImportTypesFromItsOwnPackage(String packageName) {
+			String prefix = packageName.isEmpty() ? "" : "package " + packageName + ";\n\n";
+			String before = prefix + """
+					public class Example {
+						public int sum(Item[] items) {
+							int total = 0;
+							for (int i = 0; i < items.length; i++) {
+								total += items[i].value;
+							}
+							return total;
+						}
+					}
+					class Item { int value; }
+					""";
+			String after = before.replace("for (int i = 0; i < items.length; i++)", "for (Item item : items)")
+					.replace("items[i].value", "item.value");
+			StepHarness harness = StepHarness.forStep(buildStep(FIXTURES_ROOT + "ConvertLoop.xml"));
+			harness.test(before, after);
+			harness.test(after, after);
+		}
+
+		@ParameterizedTest
+		@ValueSource(strings = {"4.39", "4.40"})
+		void enhancedForAddsRequiredImports(String version) {
+			EquoBasedStepBuilder builder = createBuilder();
+			builder.setVersion(version);
+			builder.setPropertyPreferences(List.of("cleanup.convert_to_enhanced_for_loop=true"));
+			StepHarness.forStep(builder.build()).testResource(FIXTURES_ROOT + "ImportLoop.test", FIXTURES_ROOT + "ImportLoop.clean");
+		}
 
 		@Test
-		@Disabled("Needs a real PackageFragmentRoot for ImportRewriteAnalyzer")
+		void enhancedForPreservesConflictingTypeNames() {
+			StepHarness.forStep(buildStep(FIXTURES_ROOT + "ConvertLoop.xml"))
+					.testResource(FIXTURES_ROOT + "ImportConflict.test", FIXTURES_ROOT + "ImportConflict.clean");
+		}
+
+		@Test
 		void patternMatchingForInstanceof() {
 			runCleanUp(FIXTURES_ROOT + "PatternInstanceof.xml",
 					FIXTURES_ROOT + "PatternInstanceof.test",
@@ -377,7 +458,6 @@ class EclipseJdtCleanUpStepTest extends ResourceHarness {
 		}
 
 		@Test
-		@Disabled("Needs a real PackageFragmentRoot for ImportRewriteAnalyzer")
 		void convertToSwitchExpressions() {
 			runCleanUp(FIXTURES_ROOT + "SwitchExpression.xml",
 					FIXTURES_ROOT + "SwitchExpression.test",
@@ -385,7 +465,6 @@ class EclipseJdtCleanUpStepTest extends ResourceHarness {
 		}
 
 		@Test
-		@Disabled("Needs a real PackageFragmentRoot for ImportRewriteAnalyzer")
 		void convertToEnhancedForLoop() {
 			runCleanUp(FIXTURES_ROOT + "ConvertLoop.xml",
 					FIXTURES_ROOT + "ConvertLoop.test",

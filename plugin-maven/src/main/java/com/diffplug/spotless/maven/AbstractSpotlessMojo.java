@@ -27,6 +27,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -39,6 +40,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
+import org.apache.maven.execution.MavenSession;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugins.annotations.Component;
@@ -61,6 +63,7 @@ import com.diffplug.spotless.LintSuppression;
 import com.diffplug.spotless.Provisioner;
 import com.diffplug.spotless.extra.P2Provisioner;
 import com.diffplug.spotless.maven.antlr4.Antlr4;
+import com.diffplug.spotless.maven.asciidoc.Asciidoc;
 import com.diffplug.spotless.maven.cpp.Cpp;
 import com.diffplug.spotless.maven.css.Css;
 import com.diffplug.spotless.maven.generic.Format;
@@ -83,6 +86,7 @@ import com.diffplug.spotless.maven.scala.Scala;
 import com.diffplug.spotless.maven.shell.Shell;
 import com.diffplug.spotless.maven.sql.Sql;
 import com.diffplug.spotless.maven.tabletest.TableTest;
+import com.diffplug.spotless.maven.toml.Toml;
 import com.diffplug.spotless.maven.typescript.Typescript;
 import com.diffplug.spotless.maven.yaml.Yaml;
 
@@ -107,17 +111,14 @@ public abstract class AbstractSpotlessMojo extends AbstractMojo {
 	@Component
 	protected BuildContext buildContext;
 
+	@Component
+	private MavenSession mavenSession;
+
 	@Parameter(defaultValue = "${mojoExecution.goal}", required = true, readonly = true)
 	private String goal;
 
 	@Parameter(property = "spotless.skip", defaultValue = "false")
 	private boolean skip;
-
-	@Parameter(property = "spotless.apply.skip", defaultValue = "false")
-	private boolean applySkip;
-
-	@Parameter(property = "spotless.check.skip", defaultValue = "false")
-	private boolean checkSkip;
 
 	@Parameter(defaultValue = "${project}", required = true, readonly = true)
 	private MavenProject project;
@@ -177,6 +178,9 @@ public abstract class AbstractSpotlessMojo extends AbstractMojo {
 	private Antlr4 antlr4;
 
 	@Parameter
+	private Asciidoc asciidoc;
+
+	@Parameter
 	private Pom pom;
 
 	@Parameter
@@ -211,6 +215,9 @@ public abstract class AbstractSpotlessMojo extends AbstractMojo {
 
 	@Parameter
 	private TableTest tableTest;
+
+	@Parameter
+	private Toml toml;
 
 	@Parameter(property = "spotlessFiles")
 	private String filePatterns;
@@ -292,16 +299,14 @@ public abstract class AbstractSpotlessMojo extends AbstractMojo {
 			getLog().debug("Skipping for incremental builds as parameter 'enableForIncrementalBuilds' is set to 'false'");
 			return true;
 		}
+		return isGoalSpecificSkip();
+	}
 
-		switch (goal) {
-		case GOAL_CHECK:
-			return checkSkip;
-		case GOAL_APPLY:
-			return applySkip;
-		default:
-			break;
-		}
-
+	/**
+	 * Goal-specific skip flags live on the concrete mojos (e.g. {@code spotless.check.skip}).
+	 * Override when a goal has its own property.
+	 */
+	protected boolean isGoalSpecificSkip() {
 		return false;
 	}
 
@@ -401,9 +406,40 @@ public abstract class AbstractSpotlessMojo extends AbstractMojo {
 		P2Provisioner p2Provisioner = P2Provisioner.createDefault();
 		List<FormatterStepFactory> formatterStepFactories = getFormatterStepFactories();
 		FileLocator fileLocator = getFileLocator();
+		final Optional<String> userRatchetFrom = Optional.ofNullable((String) mavenSession.getUserProperties().get("ratchetFrom"));
 		final Optional<String> optionalRatchetFrom = Optional.ofNullable(this.ratchetFrom)
 				.filter(ratchet -> !RATCHETFROM_NONE.equals(ratchet));
-		return new FormatterConfig(baseDir, encoding, lineEndings, optionalRatchetFrom, provisioner, p2Provisioner, fileLocator, formatterStepFactories, Optional.ofNullable(setLicenseHeaderYearsFromGitHistory), lintSuppressions);
+		// Lazy: only resolve dependencies when the expandWildcardImports step actually requests the classpath.
+		Supplier<Set<File>> projectClasspathSupplier = () -> computeTypeSolverClasspath(resolver);
+		return new FormatterConfig(baseDir, encoding, lineEndings, userRatchetFrom, optionalRatchetFrom, provisioner, p2Provisioner, fileLocator, formatterStepFactories, Optional.ofNullable(setLicenseHeaderYearsFromGitHistory), lintSuppressions, Optional.of(projectClasspathSupplier));
+	}
+
+	private Set<File> computeTypeSolverClasspath(ArtifactResolver resolver) {
+		Set<File> classpath = new LinkedHashSet<>();
+
+		// Add source roots (directories containing .java files for JavaParserTypeSolver)
+		for (String sourceRoot : project.getCompileSourceRoots()) {
+			File dir = new File(sourceRoot);
+			if (dir.exists()) {
+				classpath.add(dir);
+			}
+		}
+		for (String sourceRoot : project.getTestCompileSourceRoots()) {
+			File dir = new File(sourceRoot);
+			if (dir.exists()) {
+				classpath.add(dir);
+			}
+		}
+
+		// Resolve dependency JARs via RepositorySystem (for JarTypeSolver)
+		try {
+			Set<File> dependencyJars = resolver.resolveProjectDependencies(project, repositories);
+			classpath.addAll(dependencyJars);
+		} catch (Exception e) {
+			getLog().warn("Could not resolve project dependencies for expandWildcardImports: " + e.getMessage());
+		}
+
+		return classpath;
 	}
 
 	private FileLocator getFileLocator() {
@@ -414,7 +450,7 @@ public abstract class AbstractSpotlessMojo extends AbstractMojo {
 	}
 
 	private List<FormatterFactory> getFormatterFactories() {
-		return Stream.concat(formats.stream(), Stream.of(groovy, java, scala, kotlin, cpp, css, typescript, javascript, antlr4, pom, sql, python, markdown, json, shell, yaml, gherkin, go, rdf, protobuf, tableTest))
+		return Stream.concat(formats.stream(), Stream.of(groovy, java, scala, kotlin, asciidoc, cpp, css, typescript, javascript, antlr4, pom, sql, python, markdown, json, shell, yaml, gherkin, go, rdf, protobuf, tableTest, toml))
 				.filter(Objects::nonNull)
 				.map(factory -> factory.init(repositorySystemSession))
 				.collect(toList());

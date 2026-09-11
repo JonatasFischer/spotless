@@ -268,6 +268,26 @@ class JavaEclipseCleanUpUnitTest {
 	}
 
 	@Test
+	void sourceLevelAndStrictnessUpdateTheStep() throws Exception {
+		JavaExtension.EclipseCleanUpConfig config = javaExtension.eclipseCleanUp();
+		FormatterStep before = lastStep();
+		assertThat(config.javaVersion("21")).isSameAs(config);
+		assertThat(lastStep()).isNotSameAs(before);
+		before = lastStep();
+		assertThat(config.strict(true)).isSameAs(config);
+		assertThat(lastStep()).isNotSameAs(before);
+		var method = EquoBasedStepBuilder.class.getDeclaredMethod("stepProperties");
+		method.setAccessible(true);
+		@SuppressWarnings("unchecked")
+		Map<String, String> properties = (Map<String, String>) method.invoke(builderOf(config));
+		assertThat(properties).containsEntry("sp_cleanup.java_version", "21").containsEntry("sp_cleanup.strict", "true");
+		config.javaVersion("17").strict(false);
+		@SuppressWarnings("unchecked")
+		Map<String, String> updated = (Map<String, String>) method.invoke(builderOf(config));
+		assertThat(updated).containsEntry("sp_cleanup.java_version", "17").containsEntry("sp_cleanup.strict", "false");
+	}
+
+	@Test
 	void configPropertiesUpdatesBuilderAndStepsList() throws Exception {
 		JavaExtension.EclipseCleanUpConfig config = javaExtension.eclipseCleanUp();
 		FormatterStep beforeStep = lastStep();

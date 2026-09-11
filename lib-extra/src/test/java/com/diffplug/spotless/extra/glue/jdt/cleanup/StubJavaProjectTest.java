@@ -16,11 +16,8 @@
 package com.diffplug.spotless.extra.glue.jdt.cleanup;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.lang.reflect.Field;
 import java.util.Map;
-import java.util.function.UnaryOperator;
 
 import org.eclipse.jdt.core.JavaCore;
 import org.junit.jupiter.api.Test;
@@ -68,39 +65,15 @@ class StubJavaProjectTest {
 	}
 
 	@Test
-	void getOptionUnpinnedKeyDelegatesToJavaCoreWhenInheriting() throws Exception {
-		// Swap the JavaCore lookup with a deterministic stub so the test can verify the
-		// delegation path returns a specific, known value. JavaCore.setOptions cannot be used in
-		// the unit-test JVM (no OSGi → IEclipsePreferences is null), so we route via the test
-		// seam.
-		Field lookupField = StubJavaProject.class.getDeclaredField("JAVA_CORE_LOOKUP");
-		lookupField.setAccessible(true);
-		@SuppressWarnings("unchecked")
-		UnaryOperator<String> original = (UnaryOperator<String>) lookupField.get(null);
-		try {
-			lookupField.set(null, (UnaryOperator<String>) name -> "STUBBED-FOR-TEST-" + name);
-			assertThat(StubJavaProject.INSTANCE.getOption("any.unpinned.key", true))
-					.isEqualTo("STUBBED-FOR-TEST-any.unpinned.key");
-		} finally {
-			lookupField.set(null, original);
-		}
+	void getOptionUnpinnedKeyDelegatesToJavaCoreWhenInheriting() {
+		assertThat(StubJavaProject.INSTANCE.getOption(JavaCore.COMPILER_PB_UNUSED_IMPORT, true))
+				.isNotNull().isEqualTo(JavaCore.getOptions().get(JavaCore.COMPILER_PB_UNUSED_IMPORT));
 	}
 
 	@Test
-	void getOptionUnpinnedKeyReturnsNullWhenNotInheriting() throws Exception {
-		// With a known-non-null lookup installed, the false-branch must still return null
-		// (NOT delegate to the lookup). This kills the RemoveConditional mutant on the ternary.
-		Field lookupField = StubJavaProject.class.getDeclaredField("JAVA_CORE_LOOKUP");
-		lookupField.setAccessible(true);
-		@SuppressWarnings("unchecked")
-		UnaryOperator<String> original = (UnaryOperator<String>) lookupField.get(null);
-		try {
-			lookupField.set(null, (UnaryOperator<String>) name -> "should-not-be-returned");
-			assertThat(StubJavaProject.INSTANCE.getOption("any.unpinned.key", false)).isNull();
-			assertThat(StubJavaProject.INSTANCE.getOption("totally.unknown.key", false)).isNull();
-		} finally {
-			lookupField.set(null, original);
-		}
+	void getOptionUnpinnedKeyReturnsNullWhenNotInheriting() {
+		assertThat(StubJavaProject.INSTANCE.getOption(JavaCore.COMPILER_PB_UNUSED_IMPORT, false)).isNull();
+		assertThat(StubJavaProject.INSTANCE.getOption("totally.unknown.key", false)).isNull();
 	}
 
 	@Test
@@ -121,48 +94,29 @@ class StubJavaProjectTest {
 		assertThat(StubJavaProject.INSTANCE.getEclipsePreferences()).isNull();
 	}
 
-	// =========================================================================
-	// Failure path: createInstance with an unknown field name. Covers the catch
-	// block that translates ReflectiveOperationException to IllegalStateException
-	// — a contract guard for future JDT versions that may rename the field.
-	// =========================================================================
-
 	@Test
-	void createInstanceThrowsForUnknownProjectField() {
-		assertThatThrownBy(() -> StubJavaProject.createInstance("definitelyNotAField"))
-				.isInstanceOf(IllegalStateException.class)
-				.hasMessageContaining("JavaProject#definitelyNotAField")
-				.hasCauseInstanceOf(NoSuchFieldException.class);
+	void sourceLevelsAreIsolatedBetweenProjects() {
+		StubJavaProject java8 = new StubJavaProject(CleanUpConstants.compilerOptions("8"));
+		StubJavaProject java21 = new StubJavaProject(CleanUpConstants.compilerOptions("21"));
+		assertThat(java8.getOption(JavaCore.COMPILER_SOURCE, true)).isEqualTo("1.8");
+		assertThat(java21.getOption(JavaCore.COMPILER_SOURCE, false)).isEqualTo("21");
+		assertThat(java8.getOptions(false)).containsEntry(JavaCore.COMPILER_CODEGEN_TARGET_PLATFORM, "1.8");
+		assertThat(java21.getOptions(true)).containsEntry(JavaCore.COMPILER_COMPLIANCE, "21");
+		assertThat(StubJavaProject.INSTANCE.getOption(JavaCore.COMPILER_SOURCE, false)).isEqualTo("17");
+		assertThat(java8).isNotEqualTo(java21);
+		assertThat(java8.getProject()).isNotSameAs(java21.getProject());
 	}
 
 	@Test
-	void createInstanceWithRealFieldNameReturnsAWiredProject() {
-		// Drives the success path of createInstance — kills the NullReturnValsMutator on the
-		// `return inst` statement (which would otherwise survive because the singleton is built
-		// during static init and the existing tests only consult INSTANCE).
-		StubJavaProject built = StubJavaProject.createInstance("project");
-		assertThat(built).isNotNull();
-		// The project field must point to the stub IProject.
-		assertThat(built.getProject()).isNotNull();
-		assertThat(built.getProject().getName()).isEqualTo(CleanUpConstants.STUB_PROJECT_NAME);
+	void compilerOptionsAreSnapshotted() {
+		Map<String, String> options = new java.util.HashMap<>(CleanUpConstants.compilerOptions("21"));
+		StubJavaProject project = new StubJavaProject(options);
+		options.clear();
+		assertThat(project.getOptions(false)).isUnmodifiable().containsEntry(JavaCore.COMPILER_SOURCE, "21");
 	}
 
 	@Test
-	void getOptionUnpinnedKeyHonoursInheritFlag() throws Exception {
-		// Both branches return distinct, observable values when the lookup is stubbed.
-		Field lookupField = StubJavaProject.class.getDeclaredField("JAVA_CORE_LOOKUP");
-		lookupField.setAccessible(true);
-		@SuppressWarnings("unchecked")
-		UnaryOperator<String> original = (UnaryOperator<String>) lookupField.get(null);
-		try {
-			lookupField.set(null, (UnaryOperator<String>) name -> "non-null-stub");
-			assertThat(StubJavaProject.INSTANCE.getOption("k", true)).isEqualTo("non-null-stub");
-			assertThat(StubJavaProject.INSTANCE.getOption("k", false)).isNull();
-			// They MUST differ — kills the ternary-true and ternary-false mutants.
-			assertThat(StubJavaProject.INSTANCE.getOption("k", true))
-					.isNotEqualTo(StubJavaProject.INSTANCE.getOption("k", false));
-		} finally {
-			lookupField.set(null, original);
-		}
+	void unknownOptionHasNoInheritedValue() {
+		assertThat(StubJavaProject.INSTANCE.getOption("unknown.option", true)).isNull();
 	}
 }

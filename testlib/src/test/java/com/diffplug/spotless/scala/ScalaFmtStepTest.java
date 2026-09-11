@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2025 DiffPlug
+ * Copyright 2016-2026 DiffPlug
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -86,6 +86,24 @@ class ScalaFmtStepTest extends ResourceHarness {
 				return ScalaFmtStep.create(version, TestProvisioner.mavenCentral(), configFile);
 			}
 		}.testEquals();
+	}
+
+	@Test
+	void behaviorVersionFromConfigFile() {
+		StepHarness.forStep(ScalaFmtStep.create((String) null, TestProvisioner.mavenCentral(), createTestFile("scala/scalafmt/scalafmt.conf")))
+				.testResource("scala/scalafmt/basic.dirty", "scala/scalafmt/basic.cleanWithCustomConf_3.0.0");
+	}
+
+	@Test
+	void behaviorVersionFromConfigFileNewerVersion() {
+		StepHarness.forStep(ScalaFmtStep.create((String) null, TestProvisioner.mavenCentral(), createTestFile("scala/scalafmt/scalafmt_newer.conf")))
+				.testResource("scala/scalafmt/basic.dirty", "scala/scalafmt/basic.cleanWithCustomConf_3.0.0");
+	}
+
+	@Test
+	void behaviorDefaultVersionWithoutConfigFile() {
+		StepHarness.forStep(ScalaFmtStep.create((String) null, TestProvisioner.mavenCentral(), null))
+				.testResource("scala/scalafmt/basic.dirty", "scala/scalafmt/basic.clean_3.0.0");
 	}
 
 	@Test

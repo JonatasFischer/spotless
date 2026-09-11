@@ -75,12 +75,20 @@ public class Java extends FormatterFactory {
 		addStepFactory(palantirJavaFormat);
 	}
 
+	public void addPrinceOfSpace(PrinceOfSpace princeOfSpace) {
+		addStepFactory(princeOfSpace);
+	}
+
 	public void addRemoveUnusedImports(RemoveUnusedImports removeUnusedImports) {
 		addStepFactory(removeUnusedImports);
 	}
 
 	public void addForbidWildcardImports(ForbidWildcardImports forbidWildcardImports) {
 		addStepFactory(forbidWildcardImports);
+	}
+
+	public void addExpandWildcardImports(ExpandWildcardImports expandWildcardImports) {
+		addStepFactory(expandWildcardImports);
 	}
 
 	public void addForbidModuleImports(ForbidModuleImports forbidModuleImports) {
@@ -97,6 +105,10 @@ public class Java extends FormatterFactory {
 
 	public void addTableTestFormatter(TableTestFormatter tableTestFormatter) {
 		addStepFactory(tableTestFormatter);
+	}
+
+	public void addShortenFullyQualifiedTypes(ShortenFullyQualifiedTypes shortenFullyQualifiedTypes) {
+		addStepFactory(shortenFullyQualifiedTypes);
 	}
 
 	private static String fileMask(Path path) {

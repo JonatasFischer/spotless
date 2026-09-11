@@ -16,6 +16,7 @@
 package com.diffplug.spotless.extra.glue.jdt.cleanup;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
@@ -26,6 +27,14 @@ import org.junit.jupiter.api.Test;
 
 /** Locks down constant values that other parts of the system depend on by name. */
 class CleanUpConstantsTest {
+
+	@Test
+	void acceptsJava8And21AndRejectsUnknownJdtLanguageVersions() {
+		assertThat(CleanUpConstants.compilerOptions("8")).containsEntry(JavaCore.COMPILER_SOURCE, "1.8");
+		assertThat(CleanUpConstants.compilerOptions("21")).containsEntry(JavaCore.COMPILER_COMPLIANCE, "21");
+		assertThatThrownBy(() -> CleanUpConstants.compilerOptions("99"))
+				.isInstanceOf(IllegalArgumentException.class).hasMessageContaining("99", "selected Eclipse JDT", "supported versions");
+	}
 
 	@Test
 	void javaLevelIs17() {

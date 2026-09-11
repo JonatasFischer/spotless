@@ -3,15 +3,100 @@
 We adhere to the [keepachangelog](https://keepachangelog.com/en/1.0.0/) format (starting after version `3.27.0`).
 
 ## [Unreleased]
+
 ### Added
+- Add `eclipseCleanUp()` to apply Eclipse JDT Clean Up profiles, including pattern matching, switch expressions and enhanced for-loops using an in-memory Java source model. See the README for supported actions and headless-runtime limitations.
+- Eclipse Clean Up supports `javaVersion('21')` (default `17`) and opt-in `strict(true)`. Ignored actions now emit visible diagnostics, including unsupported enabled profile options and incompatible language levels.
+
+### Fixed
+- `versionCatalog()` preserves entries when comments contain unmatched brackets, preserves commas inside quoted strings, and keeps significant line boundaries in multiline entries. ([#3042](https://github.com/diffplug/spotless/pull/3042))
+- `versionCatalog()` now reports unfinished entries as lints at their starting line. These fail formatting by default, so upgrading may expose catalog errors that previously caused silent data loss. ([#3042](https://github.com/diffplug/spotless/pull/3042))
+
+## [8.10.2] - 2026-09-04
+### Fixed
+- `shortenFullyQualifiedTypes()` now shortens fully-qualified types used in expression contexts (such as static method calls, static fields, and enum constants) while avoiding imports that would change how existing unqualified type references resolve. ([#3039](https://github.com/diffplug/spotless/pull/3039))
+- Eclipse JDT formatter step no longer fails with `NoClassDefFoundError` when lombok is active as a JVM agent (e.g. `-javaagent:lombok.jar` in Eclipse/VS Code/Cursor). ([#2795](https://github.com/diffplug/spotless/issues/2795))
+
+## [8.10.1] - 2026-08-27
+### Fixed
+- `prettier()` and other npm-based steps no longer fail to start on npm 12 (`EUNKNOWNCONFIG` from `--scripts-prepend-node-path`). ([#3024](https://github.com/diffplug/spotless/issues/3024))
+- `spotlessInternalRegisterDependencies` now writes its output under a build directory that is configured after the plugin is applied, instead of always under the default `build/`. ([#2114](https://github.com/diffplug/spotless/issues/2114))
+- `targetExclude` now accepts a Gradle `Directory`, `DirectoryProperty`, or `Provider<Directory>` and excludes the files under it. Previously the directory was treated as a single file, so excluding one silently did nothing. ([#2667](https://github.com/diffplug/spotless/issues/2667))
+
+## [8.10.0] - 2026-08-17
+### Added
+- New `shortenFullyQualifiedTypes()` step for Java, which replaces fully-qualified type names with their simple names and adds the imports they need. Best combined with `importOrder()` and `removeUnusedImports()`. ([#2945](https://github.com/diffplug/spotless/issues/2945))
+- Add embedded lockfiles to Eclipse JDT for every supported version (`4.9` through `4.40`), so `eclipse()` resolves from Maven Central instead of querying a P2 update site. Versions without an embedded lockfile still fall back to P2 provisioning. ([#1996](https://github.com/diffplug/spotless/issues/1996))
+### Fixed
+- `removeUnusedImports` no longer fails on Java `import module` declarations. ([#2890](https://github.com/diffplug/spotless/issues/2890))
+- `expandWildcardImports()` now builds its type-solver classpath from each Java source set's compile classpath instead of every resolvable configuration. Unrelated configurations (for example generated-code or custom resolvable configs that are not ready yet) are no longer resolved. ([#2998](https://github.com/diffplug/spotless/issues/2998))
+- `spotlessCheck` violation message now suggests the correct composite/included-build task path (e.g. `./gradlew :my-utils:spotlessApply`) instead of a bare `spotlessApply` / `:spotlessApply` that does not select included-build tasks. ([#2421](https://github.com/diffplug/spotless/issues/2421))
+- Parallel multi-project builds no longer intermittently fail with "Cannot fingerprint input property 'stepsInternalEquality': ConfigurationCacheHackList cannot be serialized" / "Failed to provision P2 dependencies" when using `eclipse()` (or other P2-backed steps). Subprojects now share one deduping P2 provisioner and P2 queries are serialized process-wide. ([#3004](https://github.com/diffplug/spotless/issues/3004))
+### Changes
+- Default `google-java-format` remains `1.28.0` on JVM 17; bumps to `1.30.0` on JVM 21+; require at least `1.30.0` on JVM 25+ for `import module` support.
+- Bump default `eclipse` version to latest `4.39` -> `4.40`. ([#1996](https://github.com/diffplug/spotless/issues/1996))
+- Bump default `adocfmt` version `0.2.0` -> `0.3.1`, which adds table formatting support (`formatTables`, `tableLayout`, `tableMaxLineWidth`, `tableBlankLines`).
+
+## [8.9.0] - 2026-07-27
+### Added
+- Add support for Java formatting via [`prince-of-space`](https://github.com/agustafson/prince-of-space) with the new `princeOfSpace()` step. ([#2991](https://github.com/diffplug/spotless/pull/2991))
+### Fixed
+- Prevent parallel Gradle input fingerprinting from failing when `toggleOffOn()` wraps a slow lazy formatter step with no matching target files. ([#2994](https://github.com/diffplug/spotless/pull/2994))
+### Changes
+- Bump default `greclipse` version to latest `4.39` -> `4.40`. ([#2989](https://github.com/diffplug/spotless/pull/2989))
+- Bump default `tabletest-formatter` version `1.1.1` -> `1.1.2`.
+
+## [8.8.0] - 2026-06-29
+### Added
+- Add support for custom string format for license header copyright year via `yearStringFormat()`. ([#2965](https://github.com/diffplug/spotless/pull/2965))
+
+## [8.7.0] - 2026-06-16
+
+### Added
+- Add support for AsciiDoc formatting via `adocfmt`. ([#2960](https://github.com/diffplug/spotless/pull/2960))
+- `flexmark()` step now supports arbitrary formatter options via the `formatterOptions` map. ([#2968](https://github.com/diffplug/spotless/pull/2968))
+### Fixed
+- `toggleOffOn` no longer disables lint-only steps such as `forbidWildcardImports`. ([#2962](https://github.com/diffplug/spotless/pull/2962))
+- Prevent build caches from interfering when executing under the `-PspotlessIdeHook` mode. ([#2365](https://github.com/diffplug/spotless/issues/2365))
+- Parse standard git year output in LicenseHeaderStep. ([#2940](https://github.com/diffplug/spotless/issues/2940))
+- Fix `StringIndexOutOfBoundsException` in scenarios where copyright year is surrounded by whitespace. ([#2973](https://github.com/diffplug/spotless/pull/2973))
+
+### Changes
+- Bump default `greclipse` version to latest `4.35` -> `4.39`. ([#2924](https://github.com/diffplug/spotless/pull/2924))
+- Bump default `ktfmt` version to latest `0.61` -> `0.63`. ([#2957](https://github.com/diffplug/spotless/pull/2957)
+
+## [8.6.0] - 2026-05-27
+### Added
+- Add `cacheDirectory(...)` to `eclipse()`, `eclipseCdt()`, and `greclipse()`; the default P2 cache is `$GRADLE_USER_HOME/caches/p2-data`. ([#2944](https://github.com/diffplug/spotless/pull/2944))
+### Fixed
+- `forbidWildcardImports` and `forbidModuleImports` now detect imports that have leading whitespace (indentation/tabs). ([#2939](https://github.com/diffplug/spotless/pull/2939))
+- `versionCatalog()` no longer splits long inline tables across multiple lines — Gradle's TOML 1.0 parser cannot read multi-line inline tables. The `maxLineLength` option has been removed. ([#2948](https://github.com/diffplug/spotless/issues/2948))
+- `EclipseJdtFormtterStep` now can conditionally set compiler source/compliance options. Allows for better parsing of AST Node for newer language features and more correct sorting; e.g. records or seal classes. ([#2942](https://github.com/diffplug/spotless/pull/2942))
+### Changes
+- Improved formatting performance by eliminating redundant per-step line-ending normalization in the core formatter loop. ([#2934](https://github.com/diffplug/spotless/pull/2934))
+
+## [8.5.1] - 2026-05-15
+### Fixed
+- `licenseHeader` with `setLicenseHeaderYearsFromGitHistory()` no longer runs `git log` through a shell, eliminating a shell-injection vector when formatting files whose names contain shell metacharacters.
+
+## [8.5.0] - 2026-05-14
+### Added
+- `scalafmt()` now reads the version from the `version` field in the scalafmt config file when no version is explicitly set in the plugin config, falling back to the built-in default only if neither is available. ([#2922](https://github.com/diffplug/spotless/pull/2922))
+- Add `toml` format type with `versionCatalog()` step for formatting and sorting Gradle version catalog files. ([#2916](https://github.com/diffplug/spotless/issues/2916))
 - Add `withIndentStyle` and `withIndentSize` configuration to `tableTestFormatter` for setting the fallback indent when no `.editorconfig` is found. ([#2893](https://github.com/diffplug/spotless/pull/2893))
 - Add `javaparserVersion(...)` to `cleanthat`, allowing users to override the JavaParser version pulled in transitively by Cleanthat. ([#2903](https://github.com/diffplug/spotless/pull/2903))
-- Add `eclipseCleanUp()` step which applies Eclipse JDT Clean Up actions from a profile XML exported via Eclipse IDE (`Preferences -> Java -> Code Style -> Clean Up -> Export`). Bootstraps an Equo Solstice OSGi runtime so most cleanups — including those that go through `ImportRewrite` (lambda conversion, remove unused imports, ...) — work the same way as inside Eclipse IDE. A few cleanups that walk the `PackageFragmentRoot` hierarchy (`cleanup.instanceof`, `cleanup.convert_to_switch_expressions`, `cleanup.convert_to_enhanced_for_loop`) are skipped silently because they need a real Eclipse workspace; see `EclipseJdtCleanUpStep` Javadoc for the exhaustive list.
 ### Fixed
 - Fix `tableTestFormatter` editorconfig cache not honoring `.editorconfig` changes across Gradle daemon runs due to a shared static `EditorConfigProvider`. ([#2893](https://github.com/diffplug/spotless/pull/2893))
+- Preserve case of JDBI named bind params that collide with SQL keywords (e.g. `:limit`, `:offset`) in the DBeaver SQL formatter. ([#2899](https://github.com/diffplug/spotless/pull/2899))
+- Fix non-idempotent formatting when `importOrder()` is combined with `greclipse()`: a single catch-all group no longer strips blank lines that `greclipse()` independently inserted between import groups. ([#2914](https://github.com/diffplug/spotless/pull/2914))
+- Fix `predeclareDepsFromBuildscript()` on Gradle 9 by avoiding mutation of the root buildscript configuration container. ([#2929](https://github.com/diffplug/spotless/pull/2929), fixes [#2599](https://github.com/diffplug/spotless/issues/2599))
 ### Changes
+- Fix `expandWildcardImports` failing on JDK XML types such as `org.xml.sax.InputSource`. ([#2921](https://github.com/diffplug/spotless/pull/2921))
+- Use Eclipse JDT's collator-based comparison when sorting Java members to better match Eclipse save actions. ([#2920](https://github.com/diffplug/spotless/pull/2920))
 - Bump default `cleanthat` version `2.24` -> `2.25`. ([#2903](https://github.com/diffplug/spotless/pull/2903))
 - Bump default `eclipse-jdt` version from `4.35` to `4.39`. ([#2912](https://github.com/diffplug/spotless/pull/2912))
+- Make `spotlessPredeclare` visible to Gradle Kotlin DSL type-safe accessors. ([#2925](https://github.com/diffplug/spotless/pull/2925))
+- Allow `spotlessPredeclare` to be used directly without enabling it first in spotless extension. ([#2925](https://github.com/diffplug/spotless/pull/2925))
 
 ## [8.4.0] - 2026-03-18
 ### Added

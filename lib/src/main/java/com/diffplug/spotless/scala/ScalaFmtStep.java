@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2025 DiffPlug
+ * Copyright 2016-2026 DiffPlug
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,9 @@ import java.io.IOException;
 import java.io.Serial;
 import java.io.Serializable;
 import java.lang.reflect.Constructor;
+import java.nio.file.Files;
 import java.util.Collections;
+import java.util.Optional;
 import java.util.Set;
 
 import javax.annotation.Nullable;
@@ -54,15 +56,16 @@ public final class ScalaFmtStep implements Serializable {
 		return create(defaultVersion(), defaultScalaMajorVersion(), provisioner, null);
 	}
 
-	public static FormatterStep create(String version, Provisioner provisioner, @Nullable File configFile) {
+	public static FormatterStep create(@Nullable String version, Provisioner provisioner, @Nullable File configFile) {
 		return create(version, defaultScalaMajorVersion(), provisioner, configFile);
 	}
 
-	public static FormatterStep create(String version, @Nullable String scalaMajorVersion, Provisioner provisioner, @Nullable File configFile) {
+	public static FormatterStep create(@Nullable String version, @Nullable String scalaMajorVersion, Provisioner provisioner, @Nullable File configFile) {
+		String finalVersion = version != null ? version : versionFromConfig(configFile).orElse(defaultVersion());
 		String finalScalaMajorVersion = scalaMajorVersion == null ? DEFAULT_SCALA_MAJOR_VERSION : scalaMajorVersion;
 
 		return FormatterStep.create(NAME,
-				new ScalaFmtStep(JarState.promise(() -> JarState.from(MAVEN_COORDINATE + finalScalaMajorVersion + ":" + version, provisioner)), configFile),
+				new ScalaFmtStep(JarState.promise(() -> JarState.from(MAVEN_COORDINATE + finalScalaMajorVersion + ":" + finalVersion, provisioner)), configFile),
 				ScalaFmtStep::equalityState,
 				State::createFormat);
 	}
@@ -73,6 +76,22 @@ public final class ScalaFmtStep implements Serializable {
 
 	public static String defaultScalaMajorVersion() {
 		return DEFAULT_SCALA_MAJOR_VERSION;
+	}
+
+	private static Optional<String> versionFromConfig(@Nullable File configFile) {
+		try {
+			return configFile == null || !configFile.exists() ? Optional.empty()
+					: Files.readAllLines(configFile.toPath())
+							.stream()
+							.filter(line -> line.trim().startsWith("version"))
+							.findFirst()
+							.flatMap(line -> {
+								var parts = line.replaceAll("\\s", "").split("=");
+								return parts.length < 2 ? Optional.empty() : Optional.of(parts[1]);
+							});
+		} catch (IOException e) {
+			return Optional.empty();
+		}
 	}
 
 	private State equalityState() throws IOException {

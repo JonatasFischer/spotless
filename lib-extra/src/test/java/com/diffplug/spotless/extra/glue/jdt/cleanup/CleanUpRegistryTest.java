@@ -20,12 +20,41 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Modifier;
 import java.util.List;
+import java.util.Properties;
 
 import org.eclipse.jdt.ui.cleanup.ICleanUp;
 import org.junit.jupiter.api.Test;
 
 /** Direct unit tests for {@link CleanUpRegistry}. */
 class CleanUpRegistryTest {
+
+	@Test
+	void reportsUnsupportedEnabledOptionsInStableOrder() {
+		Properties profile = new Properties();
+		profile.setProperty("cleanup.unknown_z", "true");
+		profile.setProperty("cleanup.unknown_a", "true");
+		profile.setProperty("cleanup.unknown_disabled", "false");
+		profile.setProperty("other.key", "true");
+		profile.setProperty("cleanup.format_source_code", "true");
+		profile.setProperty("cleanup.make_variable_declarations_final", "true");
+		profile.setProperty("cleanup.make_local_variable_final", "true");
+		assertThat(CleanUpRegistry.profileProblems(profile, "17")).containsExactly(
+				"cleanup.unknown_a: not implemented by the headless cleanup registry",
+				"cleanup.unknown_z: not implemented by the headless cleanup registry");
+	}
+
+	@Test
+	void reportsLanguageRequirementsAndAcceptsTheirBoundaryVersions() {
+		Properties profile = new Properties();
+		profile.setProperty("cleanup.instanceof", "true");
+		profile.setProperty("cleanup.convert_to_switch_expressions", "true");
+		assertThat(CleanUpRegistry.profileProblems(profile, "1.8")).containsExactly(
+				"cleanup.convert_to_switch_expressions: requires Java 14 or later (configured 1.8)",
+				"cleanup.instanceof: requires Java 16 or later (configured 1.8)");
+		assertThat(CleanUpRegistry.profileProblems(profile, "14")).containsExactly(
+				"cleanup.instanceof: requires Java 16 or later (configured 14)");
+		assertThat(CleanUpRegistry.profileProblems(profile, "16")).isEmpty();
+	}
 
 	@Test
 	void buildAllReturnsAllRegisteredCleanups() {

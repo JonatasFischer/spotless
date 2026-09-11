@@ -33,11 +33,10 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import org.eclipse.core.runtime.Platform;
 import org.eclipse.core.runtime.preferences.IEclipsePreferences;
 import org.eclipse.core.runtime.preferences.InstanceScope;
 import org.eclipse.osgi.internal.location.EquinoxLocations;
@@ -56,34 +55,14 @@ import dev.equo.solstice.p2.CacheLocations;
  *
  * <p>This class mirrors the proven pattern from
  * {@code com.diffplug.spotless.extra.glue.groovy.GrEclipseFormatterStepImpl}'s static block.
- * It is a one-shot operation guarded by {@link #BOOTSTRAPPED}; subsequent calls to
+ * It is a one-shot operation guarded by {@link #bootstrapped}; subsequent calls to
  * {@link #ensureBootstrapped()} are no-ops.
  */
 public final class SolsticeBootstrap {
 
 	private static final Logger LOGGER = Logger.getLogger(SolsticeBootstrap.class.getName());
-	private static final AtomicBoolean BOOTSTRAPPED = new AtomicBoolean(false);
-
-	/**
-	 * Test-only seam. When {@code true}, {@link #ensureBootstrapped()} returns immediately without
-	 * spinning up Solstice. Each classloader that loads this class has its own copy of this field,
-	 * so flipping it on the unit-test classloader does not affect the parallel P2-isolated
-	 * classloader that production / integration tests use.
-	 *
-	 * <p>Set to {@code true} via reflection from {@code EclipseJdtCleanUpImplTest} so direct unit
-	 * tests can verify the impl's short-circuit and configure-failure paths without needing the
-	 * full OSGi runtime (which the unit-test classpath cannot provide because it contains Eclipse
-	 * fragment bundles that {@code dev.equo.solstice} declines to load).
-	 */
-	@SuppressWarnings("CanBeFinal")
-	static volatile boolean SKIP_BOOTSTRAP_FOR_TESTING = false;
-
-	/**
-	 * Counter incremented every time {@link #ensureBootstrapped()} is called. Lets tests verify
-	 * the lazy-bootstrap call site in {@code EclipseJdtCleanUpImpl#cleanUp} is actually invoked
-	 * (otherwise PIT can mutate the call away undetected).
-	 */
-	static final AtomicInteger ENSURE_BOOTSTRAPPED_CALL_COUNT = new AtomicInteger();
+	private static final Object BOOTSTRAP_LOCK = new Object();
+	private static boolean bootstrapped;
 
 	private SolsticeBootstrap() {}
 
@@ -92,22 +71,20 @@ public final class SolsticeBootstrap {
 	 *
 	 * @throws IllegalStateException if the bootstrap fails on the first invocation
 	 */
-	public static synchronized void ensureBootstrapped() {
-		ENSURE_BOOTSTRAPPED_CALL_COUNT.incrementAndGet();
-		if (SKIP_BOOTSTRAP_FOR_TESTING) {
-			return;
-		}
-		if (BOOTSTRAPPED.get()) {
-			return;
-		}
-		try {
-			startSolstice();
-			initialiseJavaManipulationPreferenceNodeId();
-			seedJdtUiImportPreferences();
-			BOOTSTRAPPED.set(true);
-		} catch (IOException e) {
-			throw new IllegalStateException(
-					"Failed to bootstrap Equo Solstice runtime for Eclipse JDT clean up", e);
+	public static void ensureBootstrapped() {
+		synchronized (BOOTSTRAP_LOCK) {
+			if (bootstrapped) {
+				return;
+			}
+			try {
+				startSolstice();
+				initialiseJavaManipulationPreferenceNodeId();
+				seedJdtUiImportPreferences();
+				bootstrapped = true;
+			} catch (IOException e) {
+				throw new IllegalStateException(
+						"Failed to bootstrap Equo Solstice runtime for Eclipse JDT clean up", e);
+			}
 		}
 	}
 

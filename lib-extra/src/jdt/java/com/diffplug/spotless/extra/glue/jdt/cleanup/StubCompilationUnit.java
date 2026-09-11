@@ -15,7 +15,6 @@
  */
 package com.diffplug.spotless.extra.glue.jdt.cleanup;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
@@ -23,21 +22,18 @@ import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.jdt.core.IBuffer;
 import org.eclipse.jdt.core.ICompilationUnit;
-import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.internal.core.CompilationUnit;
 import org.eclipse.jdt.internal.core.DefaultWorkingCopyOwner;
 import org.eclipse.jdt.internal.core.JavaElement;
-import org.eclipse.jdt.internal.core.JavaProject;
 
 import com.diffplug.spotless.extra.glue.jdt.SuppressFBWarnings;
 
 /**
  * Headless stand-in for {@link CompilationUnit} that wraps a Java source string in memory.
  *
- * <p>The Eclipse JDT cleanup pipeline navigates {@code CompilationUnit#getJavaProject()},
- * {@link #getResource()}, {@link #getParent()} and {@link #hashCode()} (final, inherited from
- * {@link JavaElement}, which dereferences the {@code owner} field). Each of those is overridden
- * here so the pipeline runs to completion without an Eclipse workspace.
+ * <p>The constructor attaches the unit to its package under an in-memory source root. Buffer
+ * and resource access are supplied locally, while parent traversal and {@link JavaElement#hashCode()}
+ * use the normal JDT model hierarchy.
  */
 @SuppressFBWarnings(value = "EQ_DOESNT_OVERRIDE_EQUALS", justification = "equals not used in clean-up context")
 public final class StubCompilationUnit extends CompilationUnit {
@@ -47,9 +43,17 @@ public final class StubCompilationUnit extends CompilationUnit {
 	private final String unitName;
 
 	public StubCompilationUnit(String source, String unitName) {
+		this(source, unitName, new StubPackageFragment(""));
+	}
+
+	StubCompilationUnit(String source, String unitName, String packageName, Map<String, String> compilerOptions) {
+		this(source, unitName, new StubPackageFragment(packageName, new StubJavaProject(compilerOptions)));
+	}
+
+	private StubCompilationUnit(String source, String unitName, StubPackageFragment parent) {
 		// owner must be non-null — JavaElement.hashCode() is final and dereferences it via
 		// calculateHashCode().
-		super(null, Objects.requireNonNull(unitName, "unitName"), DefaultWorkingCopyOwner.PRIMARY);
+		super(parent, Objects.requireNonNull(unitName, "unitName"), DefaultWorkingCopyOwner.PRIMARY);
 		this.buffer = new StubBuffer(Objects.requireNonNull(source, "source"));
 		this.fakeFile = StubProxies.createFakeFile();
 		this.unitName = unitName;
@@ -60,11 +64,6 @@ public final class StubCompilationUnit extends CompilationUnit {
 		return buffer;
 	}
 
-	@Override
-	public JavaProject getJavaProject() {
-		return StubJavaProject.INSTANCE;
-	}
-
 	/**
 	 * Honour {@code inheritJavaCoreOptions}: when true, merge the Spotless-pinned options on top of
 	 * the workbench-wide defaults so cleanups inspecting unrelated keys (e.g.
@@ -73,12 +72,7 @@ public final class StubCompilationUnit extends CompilationUnit {
 	 */
 	@Override
 	public Map<String, String> getOptions(boolean inheritJavaCoreOptions) {
-		if (!inheritJavaCoreOptions) {
-			return CleanUpConstants.DEFAULT_COMPILER_OPTIONS;
-		}
-		Map<String, String> merged = new HashMap<>(JavaCore.getOptions());
-		merged.putAll(CleanUpConstants.DEFAULT_COMPILER_OPTIONS);
-		return merged;
+		return getJavaProject().getOptions(inheritJavaCoreOptions);
 	}
 
 	@Override
@@ -103,10 +97,5 @@ public final class StubCompilationUnit extends CompilationUnit {
 	@Override
 	public IResource getResource() {
 		return fakeFile;
-	}
-
-	@Override
-	public JavaElement getParent() {
-		return StubPackageFragment.INSTANCE;
 	}
 }

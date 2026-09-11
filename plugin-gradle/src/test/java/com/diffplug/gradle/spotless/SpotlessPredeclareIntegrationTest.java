@@ -209,9 +209,13 @@ class SpotlessPredeclareIntegrationTest extends GradleIntegrationHarness {
 			setFile("sub/test.java").toResource("java/eclipse/JavaCodeUnformatted.test");
 
 			BuildResult result = gradleRunner().withArguments("spotlessApply").buildAndFail();
+			// Eclipse JDT resolves from an embedded lockfile rather than a P2 query, so an
+			// un-predeclared subproject fails on the Maven coordinates instead of on P2.
+			// greclipse still has no lockfile, so it keeps the P2 message - see
+			// GroovyDependencies.predeclareFailsWhenGroovyGrEclipseNotPredeclared.
 			assertThat(result.getOutput())
-					.contains("P2 dependencies not predeclared")
-					.contains("Add Eclipse formatter configuration to the `spotlessPredeclare` block in the root project");
+					.contains("into the `spotlessPredeclare` block in the root project")
+					.contains("org.eclipse.jdt:org.eclipse.jdt.core");
 		}
 
 		@Test
@@ -509,40 +513,148 @@ class SpotlessPredeclareIntegrationTest extends GradleIntegrationHarness {
 	}
 
 	@Nested
-	class EdgeCases {
+	class Gradle9Compatibility {
 		@Test
-		void predeclareRequiresPredeclareDepsCall() throws IOException {
-			setFile("build.gradle").toContent("""
-					plugins {
-					    id 'com.diffplug.spotless'
+		void issue2599_Gradle951_CanUsePredeclareDepsFromBuildscript() throws IOException {
+			setFile("build.gradle.kts").toContent("""
+					import com.diffplug.gradle.spotless.SpotlessExtensionPredeclare
+
+					buildscript {
+					    repositories { mavenCentral() }
 					}
-					repositories { mavenCentral() }
-					spotlessPredeclare {
-					    java { googleJavaFormat('1.17.0') }
+					plugins {
+					    id("com.diffplug.spotless")
+					}
+					spotless {
+					    predeclareDepsFromBuildscript()
+					}
+					configure<SpotlessExtensionPredeclare> {
+					    kotlin { ktfmt("0.56") }
+					}
+					spotless {
+					    kotlin {
+					        target("src/**/*.kt")
+					        ktfmt("0.56")
+					    }
 					}
 					""");
+			setFile("src/main/kotlin/basic.kt").toResource("kotlin/ktfmt/basic.dirty");
 
-			BuildResult result = gradleRunner().withArguments("spotlessApply").buildAndFail();
-			assertThat(result.getOutput())
-					.contains("Could not find method spotlessPredeclare() for arguments");
+			BuildResult result = gradleRunner()
+					.withGradleVersion("9.5.1")
+					.withArguments("spotlessApply", "--stacktrace")
+					.build();
+
+			assertThat(result.getOutput()).contains("BUILD SUCCESSFUL");
+			assertFile("src/main/kotlin/basic.kt").sameAsResource("kotlin/ktfmt/basic.clean");
 		}
 
 		@Test
-		void predeclareBlockMustComeAfterPredeclareDeps() throws IOException {
+		void gradle951CanUsePredeclareWithProjectRepositories() throws IOException {
+			setFile("build.gradle.kts").toContent("""
+					import com.diffplug.gradle.spotless.SpotlessExtensionPredeclare
+
+					plugins {
+					    id("com.diffplug.spotless")
+					}
+					repositories { mavenCentral() }
+					spotless {
+					    predeclareDeps()
+					}
+					configure<SpotlessExtensionPredeclare> {
+					    kotlin { ktfmt("0.56") }
+					}
+					spotless {
+					    kotlin {
+					        target("src/**/*.kt")
+					        ktfmt("0.56")
+					    }
+					}
+					""");
+			setFile("src/main/kotlin/basic.kt").toResource("kotlin/ktfmt/basic.dirty");
+
+			BuildResult withoutConfigurationCache = gradleRunner()
+					.withGradleVersion("9.5.1")
+					.withArguments("spotlessApply", "--stacktrace")
+					.build();
+			assertThat(withoutConfigurationCache.getOutput()).contains("BUILD SUCCESSFUL");
+			assertFile("src/main/kotlin/basic.kt").sameAsResource("kotlin/ktfmt/basic.clean");
+
+			setFile("src/main/kotlin/basic.kt").toResource("kotlin/ktfmt/basic.dirty");
+			BuildResult withConfigurationCache = gradleRunner()
+					.withGradleVersion("9.5.1")
+					.withArguments("spotlessApply", "--configuration-cache", "--stacktrace")
+					.build();
+			assertThat(withConfigurationCache.getOutput()).contains("BUILD SUCCESSFUL");
+			assertFile("src/main/kotlin/basic.kt").sameAsResource("kotlin/ktfmt/basic.clean");
+		}
+	}
+
+	@Nested
+	class EdgeCases {
+		@Test
+		void predeclareBlockEnablesPredeclareDeps() throws IOException {
 			setFile("build.gradle").toContent("""
 					plugins {
 					    id 'com.diffplug.spotless'
 					}
 					repositories { mavenCentral() }
 					spotlessPredeclare {
-					    java { googleJavaFormat('1.17.0') }
+					    format('misc') { trimTrailingWhitespace() }
+					}
+					""");
+
+			BuildResult result = gradleRunner().withArguments("help").build();
+			assertThat(result.getOutput()).contains("BUILD SUCCESSFUL");
+		}
+
+		@Test
+		void predeclareBlockCanComeBeforePredeclareDeps() throws IOException {
+			setFile("build.gradle").toContent("""
+					plugins {
+					    id 'com.diffplug.spotless'
+					}
+					repositories { mavenCentral() }
+					spotlessPredeclare {
+					    format('misc') { trimTrailingWhitespace() }
 					}
 					spotless { predeclareDeps() }
 					""");
 
-			BuildResult result = gradleRunner().withArguments("spotlessApply").buildAndFail();
-			assertThat(result.getOutput())
-					.contains("Could not find method spotlessPredeclare() for arguments");
+			BuildResult result = gradleRunner().withArguments("help").build();
+			assertThat(result.getOutput()).contains("BUILD SUCCESSFUL");
+		}
+
+		@Test
+		void predeclareBlockHasKotlinDslAccessor() throws IOException {
+			setFile("build.gradle.kts").toContent("""
+					plugins {
+					    id("com.diffplug.spotless")
+					}
+					repositories { mavenCentral() }
+					spotlessPredeclare {
+					    format("misc") { trimTrailingWhitespace() }
+					}
+					""");
+
+			BuildResult result = gradleRunner().withArguments("help").build();
+			assertThat(result.getOutput()).contains("BUILD SUCCESSFUL");
+		}
+
+		@Test
+		void predeclareBlockCanSelectBuildscriptRepositories() throws IOException {
+			setFile("build.gradle.kts").toContent("""
+					plugins {
+					    id("com.diffplug.spotless")
+					}
+					spotlessPredeclare {
+					    format("misc") { trimTrailingWhitespace() }
+					    fromBuildscriptRepositories()
+					}
+					""");
+
+			BuildResult result = gradleRunner().withArguments("help").build();
+			assertThat(result.getOutput()).contains("BUILD SUCCESSFUL");
 		}
 
 		@Test

@@ -21,8 +21,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 import org.eclipse.jdt.internal.ui.fix.MapCleanUpOptions;
 import org.eclipse.jdt.ui.cleanup.CleanUpOptions;
@@ -30,6 +28,7 @@ import org.eclipse.jdt.ui.cleanup.ICleanUp;
 
 import com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpApplier;
 import com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpConstants;
+import com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpDiagnostics;
 import com.diffplug.spotless.extra.glue.jdt.cleanup.CleanUpRegistry;
 import com.diffplug.spotless.extra.glue.jdt.cleanup.SolsticeBootstrap;
 
@@ -49,29 +48,38 @@ import com.diffplug.spotless.extra.glue.jdt.cleanup.SolsticeBootstrap;
  */
 public class EclipseJdtCleanUpImpl {
 
-	private static final Logger LOGGER = Logger.getLogger(EclipseJdtCleanUpImpl.class.getName());
-
 	private final CleanUpOptions cleanUpOptions;
 	private final List<ICleanUp> cleanUps;
+	private final Runnable bootstrap;
+	private final boolean hasAnyCleanUpEnabled;
+	private final Map<String, String> compilerOptions;
+	private final CleanUpDiagnostics diagnostics;
+	private final List<String> profileProblems;
+	private boolean profileReported;
 
 	public EclipseJdtCleanUpImpl(Properties settings) {
-		this(settings, CleanUpRegistry.buildAll());
+		this(settings, Map.of());
 	}
 
-	/**
-	 * Internal constructor used by the public ctor and by unit tests. Lets tests inject a
-	 * synthetic list of {@link ICleanUp} instances (e.g. ones whose {@code setOptions} throws) to
-	 * exercise the {@link #configure} branch coverage without depending on the real catalogue.
-	 */
-	EclipseJdtCleanUpImpl(Properties settings, List<ICleanUp> cleanUps) {
+	public EclipseJdtCleanUpImpl(Properties settings, Map<String, String> stepProperties) {
+		this(settings, stepProperties, CleanUpRegistry.buildAll(), SolsticeBootstrap::ensureBootstrapped);
+	}
+
+	EclipseJdtCleanUpImpl(Properties settings, List<ICleanUp> cleanUps, Runnable bootstrap) {
+		this(settings, Map.of(), cleanUps, bootstrap);
+	}
+
+	EclipseJdtCleanUpImpl(Properties settings, Map<String, String> stepProperties, List<ICleanUp> cleanUps, Runnable bootstrap) {
 		Objects.requireNonNull(settings, "settings");
-		Objects.requireNonNull(cleanUps, "cleanUps");
+		String javaVersion = stepProperties.getOrDefault("sp_cleanup.java_version", "17");
+		this.compilerOptions = CleanUpConstants.compilerOptions(javaVersion);
+		this.diagnostics = new CleanUpDiagnostics(Boolean.parseBoolean(stepProperties.getOrDefault("sp_cleanup.strict", "false")));
+		this.profileProblems = CleanUpRegistry.profileProblems(settings, javaVersion);
 		this.cleanUpOptions = buildOptions(settings);
 		this.hasAnyCleanUpEnabled = anyCleanUpEnabled(settings);
-		this.cleanUps = cleanUps;
+		this.cleanUps = List.copyOf(Objects.requireNonNull(cleanUps, "cleanUps"));
+		this.bootstrap = Objects.requireNonNull(bootstrap, "bootstrap");
 	}
-
-	private final boolean hasAnyCleanUpEnabled;
 
 	/**
 	 * Returns {@code true} if at least one {@code cleanup.* = true} entry exists in the profile
@@ -86,7 +94,7 @@ public class EclipseJdtCleanUpImpl {
 			if (CleanUpConstants.FORMAT_SOURCE_CODE_KEY.equals(key)) {
 				continue;
 			}
-			if (CleanUpOptions.TRUE.equals(settings.getProperty(key))) {
+			if (key.startsWith("cleanup.") && CleanUpOptions.TRUE.equals(settings.getProperty(key))) {
 				return true;
 			}
 		}
@@ -109,47 +117,42 @@ public class EclipseJdtCleanUpImpl {
 	/**
 	 * Applies every enabled clean up action to the given Java source string.
 	 *
-	 * <p><strong>Threading:</strong> not thread-safe. Each {@link EclipseJdtCleanUpImpl} instance
-	 * owns mutable {@link ICleanUp} instances whose state ({@code setOptions}, fix cache) is
-	 * invalidated across calls. Callers must serialise invocations on the same instance, or
-	 * construct a fresh instance per worker.
+	 * <p>Calls are serialized because Eclipse cleanup instances hold mutable per-file state.
 	 *
 	 * @param raw  the raw Java source; line endings are normalised to LF before parsing
-	 * @param file reserved for API symmetry with the formatter step — do not remove (the
-	 *             reflective binding in {@code EclipseJdtCleanUpStep#apply} requires this exact
-	 *             signature). May be {@code null}.
+	 * @param file used only to identify the source in diagnostics; its contents are never read
 	 * @return the cleaned-up source, or the original if no clean up produced changes
 	 */
 	@SuppressWarnings("unused")
-	public String cleanUp(String raw, File file) {
+	public synchronized String cleanUp(String raw, File file) {
 		Objects.requireNonNull(raw, "raw");
+		if (!profileReported) {
+			if (!profileProblems.isEmpty()) {
+				diagnostics.skipped("profile options", file, String.join("; ", profileProblems), null);
+			}
+			profileReported = true;
+		}
 		if (!hasAnyCleanUpEnabled || cleanUps.isEmpty()) {
 			return raw;
 		}
-		// Lazy bootstrap: only fire OSGi runtime when we actually have cleanups to apply. Keeping
-		// this out of the static initialiser lets unit tests verify the short-circuit paths
-		// without spinning up Solstice.
-		SolsticeBootstrap.ensureBootstrapped();
-		// Normalise to LF so that JDT's parser-emitted offsets line up with our in-memory
-		// Document. The replace calls are no-ops on input without CR, so we skip the redundant
-		// short-circuit guard that PIT flagged as an equivalent mutant.
+		bootstrap.run();
+		// Keep JDT edit offsets aligned with the in-memory document.
 		String current = raw.replace("\r\n", "\n").replace("\r", "\n");
 		for (ICleanUp cleanUp : cleanUps) {
-			if (!configure(cleanUp)) {
+			if (!configure(cleanUp, file)) {
 				continue;
 			}
-			current = CleanUpApplier.apply(cleanUp, current);
+			current = CleanUpApplier.apply(cleanUp, current, compilerOptions, diagnostics, file);
 		}
 		return current;
 	}
 
-	private boolean configure(ICleanUp cleanUp) {
+	private boolean configure(ICleanUp cleanUp, File file) {
 		try {
 			cleanUp.setOptions(cleanUpOptions);
 			return true;
 		} catch (RuntimeException e) {
-			LOGGER.log(Level.FINE, e,
-					() -> "Cleanup " + cleanUp.getClass().getSimpleName() + " setOptions failed; skipping");
+			diagnostics.skipped(cleanUp.getClass().getSimpleName(), file, "setOptions failed: " + e.getMessage(), e);
 			return false;
 		}
 	}

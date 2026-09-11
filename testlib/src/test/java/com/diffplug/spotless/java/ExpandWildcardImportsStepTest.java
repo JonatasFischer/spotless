@@ -151,6 +151,39 @@ public class ExpandWildcardImportsStepTest extends ResourceHarness {
 	}
 
 	@Test
+	void expandWildcardImports_resolvesJdkXmlTypes() throws Exception {
+		FormatterStep step = ExpandWildcardImportsStep.create(Collections.emptySet(), TestProvisioner.mavenCentral());
+
+		String simpleCode = """
+				package test;
+
+				import java.io.*;
+				import org.xml.sax.InputSource;
+
+				public class Test {
+					InputSource inputSource(String value) {
+						return new InputSource(new StringReader(value));
+					}
+				}
+				""";
+
+		String expectedOutput = """
+				package test;
+
+				import java.io.StringReader;
+				import org.xml.sax.InputSource;
+
+				public class Test {
+					InputSource inputSource(String value) {
+						return new InputSource(new StringReader(value));
+					}
+				}
+				""";
+
+		StepHarness.forStep(step).test(simpleCode, expectedOutput);
+	}
+
+	@Test
 	void expandWildcardImports_nullSafety() throws Exception {
 		// Test null safety
 		try {

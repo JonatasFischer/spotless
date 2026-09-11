@@ -99,7 +99,9 @@ class StubCompilationUnitTest {
 	@Test
 	void getParentIsTheStubPackageFragment() {
 		StubCompilationUnit unit = new StubCompilationUnit(SOURCE, UNIT_NAME);
-		assertThat(unit.getParent()).isSameAs(StubPackageFragment.INSTANCE);
+		assertThat(unit.getParent()).isInstanceOf(StubPackageFragment.class);
+		assertThat(unit.getParent().getElementName()).isEmpty();
+		assertThat(unit.getParent().getParent()).isSameAs(StubPackageFragmentRoot.INSTANCE);
 	}
 
 	@Test

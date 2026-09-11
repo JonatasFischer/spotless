@@ -31,7 +31,6 @@ import java.util.Set;
 import javax.inject.Inject;
 
 import org.gradle.api.Project;
-import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.tasks.SourceSet;
 import org.gradle.api.tasks.SourceSetContainer;
 
@@ -47,7 +46,9 @@ import com.diffplug.spotless.java.FormatAnnotationsStep;
 import com.diffplug.spotless.java.GoogleJavaFormatStep;
 import com.diffplug.spotless.java.ImportOrderStep;
 import com.diffplug.spotless.java.PalantirJavaFormatStep;
+import com.diffplug.spotless.java.PrinceOfSpaceStep;
 import com.diffplug.spotless.java.RemoveUnusedImportsStep;
+import com.diffplug.spotless.java.ShortenFullyQualifiedTypesStep;
 import com.diffplug.spotless.java.TableTestFormatterStep;
 
 public class JavaExtension extends FormatExtension implements HasBuiltinDelimiterForLicense, JvmLang {
@@ -169,6 +170,11 @@ public class JavaExtension extends FormatExtension implements HasBuiltinDelimite
 		addStep(ForbidWildcardImportsStep.create());
 	}
 
+	/** Shortens fully qualified type names and adds imports. */
+	public void shortenFullyQualifiedTypes() {
+		addStep(ShortenFullyQualifiedTypesStep.create(provisioner()));
+	}
+
 	public void forbidModuleImports() {
 		addStep(ForbidModuleImportsStep.create());
 	}
@@ -176,7 +182,10 @@ public class JavaExtension extends FormatExtension implements HasBuiltinDelimite
 	public void expandWildcardImports() {
 		SourceSetContainer sourceSets = getSourceSets(getProject(), "expansion of wildcards requires the 'java' plugin to be applied");
 		Set<File> typeSolverClasspath = sourceSets.stream().flatMap(s -> s.getAllJava().getSrcDirs().stream()).collect(toSet());
-		getProject().getConfigurations().stream().filter(Configuration::isCanBeResolved).flatMap(c -> c.getFiles().stream()).forEach(typeSolverClasspath::add);
+		sourceSets.stream()
+				.map(SourceSet::getCompileClasspath)
+				.flatMap(classpath -> classpath.getFiles().stream())
+				.forEach(typeSolverClasspath::add);
 		addStep(ExpandWildcardImportsStep.create(typeSolverClasspath, provisioner()));
 	}
 
@@ -309,6 +318,73 @@ public class JavaExtension extends FormatExtension implements HasBuiltinDelimite
 		}
 	}
 
+	/** Uses the <a href="https://github.com/agustafson/prince-of-space">prince-of-space</a> jar to format source code. */
+	public PrinceOfSpaceConfig princeOfSpace() {
+		return princeOfSpace(PrinceOfSpaceStep.defaultVersion());
+	}
+
+	/** Uses the given version of <a href="https://github.com/agustafson/prince-of-space">prince-of-space</a> to format source code. */
+	public PrinceOfSpaceConfig princeOfSpace(String version) {
+		Objects.requireNonNull(version);
+		return new PrinceOfSpaceConfig(version);
+	}
+
+	public class PrinceOfSpaceConfig {
+		final String version;
+		final PrinceOfSpaceStep.Options options = new PrinceOfSpaceStep.Options();
+
+		PrinceOfSpaceConfig(String version) {
+			this.version = Objects.requireNonNull(version);
+			addStep(createStep());
+		}
+
+		public PrinceOfSpaceConfig indentStyle(String indentStyle) {
+			options.setIndentStyle(indentStyle);
+			replaceStep(createStep());
+			return this;
+		}
+
+		public PrinceOfSpaceConfig indentSize(int indentSize) {
+			options.setIndentSize(indentSize);
+			replaceStep(createStep());
+			return this;
+		}
+
+		public PrinceOfSpaceConfig lineLength(int lineLength) {
+			options.setLineLength(lineLength);
+			replaceStep(createStep());
+			return this;
+		}
+
+		public PrinceOfSpaceConfig wrapStyle(String wrapStyle) {
+			options.setWrapStyle(wrapStyle);
+			replaceStep(createStep());
+			return this;
+		}
+
+		public PrinceOfSpaceConfig closingParenOnNewLine(boolean closingParenOnNewLine) {
+			options.setClosingParenOnNewLine(closingParenOnNewLine);
+			replaceStep(createStep());
+			return this;
+		}
+
+		public PrinceOfSpaceConfig trailingCommas(boolean trailingCommas) {
+			options.setTrailingCommas(trailingCommas);
+			replaceStep(createStep());
+			return this;
+		}
+
+		public PrinceOfSpaceConfig javaLanguageLevel(int javaLanguageLevel) {
+			options.setJavaLanguageLevel(javaLanguageLevel);
+			replaceStep(createStep());
+			return this;
+		}
+
+		private FormatterStep createStep() {
+			return PrinceOfSpaceStep.create(version, provisioner(), options);
+		}
+	}
+
 	public EclipseConfig eclipse() {
 		return eclipse(EclipseJdtFormatterStep.defaultVersion());
 	}
@@ -386,6 +462,20 @@ public class JavaExtension extends FormatExtension implements HasBuiltinDelimite
 			return this;
 		}
 
+		/**
+		 * Overrides the directory used to cache the P2 dependencies fetched by
+		 * Equo/Solstice. Defaults to {@code $GRADLE_USER_HOME/caches/p2-data}.
+		 *
+		 * <p>Useful when the default location is not writable, or when you want to
+		 * place the cache elsewhere.
+		 */
+		public EclipseConfig cacheDirectory(Object cacheDirectory) {
+			Objects.requireNonNull(cacheDirectory);
+			builder.setCacheDirectory(getProject().file(cacheDirectory));
+			replaceStep(builder.build());
+			return this;
+		}
+
 	}
 
 	/** Applies Eclipse JDT Clean Up actions using the default JDT version. */
@@ -440,6 +530,20 @@ public class JavaExtension extends FormatExtension implements HasBuiltinDelimite
 				throw new IllegalArgumentException("configXml requires at least one entry");
 			}
 			builder.setXmlPreferences(List.of(configs));
+			replaceStep(builder.build());
+			return this;
+		}
+
+		/** Sets the Java language level of the source (default 17), separately from the JDT version. */
+		public EclipseCleanUpConfig javaVersion(String version) {
+			builder.setJavaVersion(version);
+			replaceStep(builder.build());
+			return this;
+		}
+
+		/** Fails the build on ignored actions; the default is to warn and continue. */
+		public EclipseCleanUpConfig strict(boolean strict) {
+			builder.setStrict(strict);
 			replaceStep(builder.build());
 			return this;
 		}

@@ -18,9 +18,9 @@ package com.diffplug.spotless.extra.glue.jdt.cleanup;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.io.File;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.HashMap;
 import java.util.List;
@@ -41,6 +41,7 @@ import org.eclipse.jdt.core.dom.AST;
 import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.AbstractTypeDeclaration;
 import org.eclipse.jdt.core.dom.CompilationUnit;
+import org.eclipse.jdt.core.dom.FieldDeclaration;
 import org.eclipse.jdt.core.dom.RecordDeclaration;
 import org.eclipse.jdt.core.refactoring.CompilationUnitChange;
 import org.eclipse.jdt.ui.cleanup.CleanUpContext;
@@ -58,6 +59,44 @@ import org.junit.jupiter.api.Test;
 /** Direct unit tests for {@link CleanUpApplier}. Drives every branch via simple mock cleanups. */
 class CleanUpApplierTest {
 
+	@Test
+	void strictRuntimeFailureNamesTheActionSourceAndCause() {
+		assertThatThrownBy(() -> CleanUpApplier.apply(new CleanUpFixtures.ThrowingRuntime(), SOURCE,
+				CleanUpConstants.DEFAULT_COMPILER_OPTIONS, new CleanUpDiagnostics(true), new File("Foo.java")))
+				.isInstanceOf(IllegalStateException.class)
+				.hasMessageContaining("ThrowingRuntime", "Foo.java", "creating fix failed", "simulated")
+				.hasCauseInstanceOf(IllegalStateException.class);
+	}
+
+	@Test
+	void strictModeAcceptsNoFixWithoutADiagnostic() {
+		assertThat(CleanUpApplier.apply(new CleanUpFixtures.NoFix(), SOURCE,
+				CleanUpConstants.DEFAULT_COMPILER_OPTIONS, new CleanUpDiagnostics(true), null)).isEqualTo(SOURCE);
+		assertThat(CAPTURED_LOG).isEmpty();
+	}
+
+	@Test
+	void tolerantFailureEmitsAVisibleWarningAndRetainsTheInput() {
+		assertThat(CleanUpApplier.apply(new CleanUpFixtures.PreConditionThrows(), SOURCE,
+				CleanUpConstants.DEFAULT_COMPILER_OPTIONS, new CleanUpDiagnostics(false), new File("Foo.java"))).isEqualTo(SOURCE);
+		assertThat(CAPTURED_LOG).anySatisfy(record -> {
+			assertThat(record.getLevel()).isEqualTo(Level.WARNING);
+			assertThat(record.getMessage()).contains("PreConditionThrows", "Foo.java", "precondition check failed", "simulated");
+		});
+	}
+
+	@Test
+	void java21SyntaxAndModelUseTheSelectedLevel() {
+		String source = "public class Foo { int length(Object o) { return switch (o) { case String s -> s.length(); default -> 0; }; } }";
+		CompilationUnit ast = CleanUpApplier.parse(source, CleanUpConstants.compilerOptions("21"), "Foo.java");
+		assertThat(ast.getProblems()).noneMatch(problem -> problem.isError());
+		ICompilationUnit unit = (ICompilationUnit) ast.getTypeRoot();
+		assertThat(unit.getOptions(false)).containsEntry(JavaCore.COMPILER_SOURCE, "21");
+		assertThat(unit.getJavaProject().getOption(JavaCore.COMPILER_SOURCE, true)).isEqualTo("21");
+		assertThat(CleanUpApplier.parse(source, CleanUpConstants.compilerOptions("17"), "Foo.java").getProblems())
+				.anyMatch(problem -> problem.isError());
+	}
+
 	private static final String SOURCE = "public class Foo {}";
 
 	private static final List<LogRecord> CAPTURED_LOG = new CopyOnWriteArrayList<>();
@@ -67,7 +106,7 @@ class CleanUpApplierTest {
 		// Capture every log record emitted from CleanUpApplier so tests can verify the EXACT
 		// message lambdas that PIT mutators target (e.g. "replaced return value with """). We
 		// keep handlers attached for the entire test suite and clear the list between tests.
-		Logger logger = Logger.getLogger(CleanUpApplier.class.getName());
+		Logger logger = Logger.getLogger(CleanUpDiagnostics.class.getName());
 		logger.setLevel(Level.FINE);
 		logger.setUseParentHandlers(false);
 		logger.addHandler(new Handler() {
@@ -88,14 +127,8 @@ class CleanUpApplierTest {
 	}
 
 	@BeforeEach
-	void clearLogBuffer() throws Exception {
+	void clearLogBuffer() {
 		CAPTURED_LOG.clear();
-		// Clear the compiler-options cache so each test re-exercises mergeCompilerOptions from
-		// scratch. Without this, the "putAll" PIT mutants can survive because a previous test
-		// has populated the cache with the correct map.
-		Field cacheField = CleanUpApplier.class.getDeclaredField("COMPILER_OPTIONS_CACHE");
-		cacheField.setAccessible(true);
-		((Map<?, ?>) cacheField.get(null)).clear();
 	}
 
 	// =========================================================================
@@ -146,17 +179,10 @@ class CleanUpApplierTest {
 	}
 
 	@Test
-	void cleanUpProducingReplaceEditAppliesIt() throws Exception {
+	void cleanUpProducingReplaceEditAppliesIt() {
 		CleanUpFixtures.RenameFooToBarFix fix = new CleanUpFixtures.RenameFooToBarFix();
-		Field rethrow = CleanUpApplier.class.getDeclaredField("RETHROW_FOR_TESTING");
-		rethrow.setAccessible(true);
-		rethrow.setBoolean(null, true);
-		try {
-			String result = CleanUpApplier.apply(fix, SOURCE);
-			assertThat(result).isEqualTo("public class Bar {}");
-		} finally {
-			rethrow.setBoolean(null, false);
-		}
+		assertThat(CleanUpApplier.apply(fix, SOURCE)).isEqualTo("public class Bar {}");
+		assertThat(CAPTURED_LOG).isEmpty();
 	}
 
 	// =========================================================================
@@ -188,13 +214,11 @@ class CleanUpApplierTest {
 	}
 
 	@Test
-	void cleanUpThrowingInPreConditionStillProceedsToCreateFix() {
-		// Precondition failure must not prevent the cleanup from running. The next call to
-		// createFix is invoked, returns null, and the source is unchanged.
+	void cleanUpThrowingInPreConditionDoesNotCreateFix() {
 		CleanUpFixtures.PreConditionThrows fixture = new CleanUpFixtures.PreConditionThrows();
 		String result = CleanUpApplier.apply(fixture, SOURCE);
 		assertThat(result).isEqualTo(SOURCE);
-		assertThat(fixture.createFixCalled).as("createFix must be invoked even after preconditions throw").isTrue();
+		assertThat(fixture.createFixCalled).as("failed preconditions prevent refactoring").isFalse();
 		// Precondition failure log message contains the cleanup name + "precondition check failed".
 		assertThat(CAPTURED_LOG).anySatisfy(record -> {
 			assertThat(record.getMessage())
@@ -250,22 +274,20 @@ class CleanUpApplierTest {
 	}
 
 	@Test
-	void mergeCompilerOptionsUserValueOverridesDefaultForSameKey() {
-		// If the user's required options contain a key that's also in DEFAULT_COMPILER_OPTIONS,
-		// the user's value must win because putAll(r) runs after putAll(DEFAULT).
+	void requirementsDoNotOverrideConfiguredSourceLevel() {
 		Map<String, String> required = Map.of(JavaCore.COMPILER_SOURCE, "11");
 		Map<String, String> result = CleanUpApplier.mergeCompilerOptions(new CleanUpFixtures.CapturingFix(required));
-		assertThat(result).containsEntry(JavaCore.COMPILER_SOURCE, "11");
+		assertThat(result).containsEntry(JavaCore.COMPILER_SOURCE, "17");
 	}
 
 	@Test
-	void mergeCompilerOptionsCachesByIdentity() {
-		// Identity-keyed cache: with the same fixture (same Requirements object → same Map ref),
-		// the second call must return the same cached map instance.
+	void mergeCompilerOptionsSnapshotsMutableRequirements() {
 		CleanUpFixtures.CapturingFix fix = new CleanUpFixtures.CapturingFix(Map.of("cache.key", "cache.value"));
 		Map<String, String> first = CleanUpApplier.mergeCompilerOptions(fix);
+		fix.getRequirements().getCompilerOptions().put("cache.key", "changed");
 		Map<String, String> second = CleanUpApplier.mergeCompilerOptions(fix);
-		assertThat(first).isSameAs(second);
+		assertThat(first).containsEntry("cache.key", "cache.value");
+		assertThat(second).containsEntry("cache.key", "changed");
 	}
 
 	@Test
@@ -323,42 +345,25 @@ class CleanUpApplierTest {
 
 	private static CompilationUnit parseSampleAst() {
 		return CleanUpApplier.parse(SOURCE, CleanUpConstants.DEFAULT_COMPILER_OPTIONS,
-				new StubCompilationUnit(SOURCE, "Foo.java"), "Foo.java");
+				"Foo.java");
 	}
 
 	@Test
 	void linkStubAsTypeRootRethrowsIllegalAccessException() throws Exception {
-		// Swap AST_TYPE_ROOT_FIELD with an inaccessible Field handle so the set() call inside
-		// linkStubAsTypeRoot raises IllegalAccessException, which the method must translate to
-		// IllegalStateException.
 		Field astFieldRef = CleanUpApplier.class.getDeclaredField("AST_TYPE_ROOT_FIELD");
 		astFieldRef.setAccessible(true);
-		Field original = (Field) astFieldRef.get(null);
-		// Acquire a fresh, inaccessible Field handle for typeRoot. Field.set checks the target's
-		// non-null first, then the access check, so we need a real CompilationUnit instance to
-		// reach the access-check path.
-		Field freshInaccessible = CompilationUnit.class.getDeclaredField("typeRoot");
-		// Note: we deliberately do NOT call setAccessible(true) here.
-		// Build a real AST so Field.set has a valid target instance.
-		Method parseMethod = CleanUpApplier.class.getDeclaredMethod(
-				"parse", String.class, Map.class, StubCompilationUnit.class, String.class);
-		parseMethod.setAccessible(true);
+		Field typeRoot = (Field) astFieldRef.get(null);
 		StubCompilationUnit stub = new StubCompilationUnit(SOURCE, "Foo.java");
-		CompilationUnit ast = (CompilationUnit) parseMethod.invoke(null,
-				SOURCE, CleanUpConstants.DEFAULT_COMPILER_OPTIONS, stub, "Foo.java");
+		CompilationUnit ast = CleanUpApplier.parse(
+				SOURCE, CleanUpConstants.DEFAULT_COMPILER_OPTIONS, "Foo.java");
 		try {
-			astFieldRef.set(null, freshInaccessible);
-			Method link = CleanUpApplier.class.getDeclaredMethod(
-					"linkStubAsTypeRoot",
-					CompilationUnit.class, StubCompilationUnit.class);
-			link.setAccessible(true);
-			assertThatThrownBy(() -> link.invoke(null, ast, stub))
-					.cause()
+			typeRoot.setAccessible(false);
+			assertThatThrownBy(() -> CleanUpApplier.linkStubAsTypeRoot(ast, stub))
 					.isInstanceOf(IllegalStateException.class)
 					.hasMessageContaining("inaccessible")
 					.hasCauseInstanceOf(IllegalAccessException.class);
 		} finally {
-			astFieldRef.set(null, original);
+			typeRoot.setAccessible(true);
 		}
 	}
 
@@ -371,9 +376,8 @@ class CleanUpApplierTest {
 
 	@Test
 	void parseProducesAnAstAtTheLatestSupportedJlsLevel() {
-		StubCompilationUnit stub = new StubCompilationUnit(SOURCE, "Foo.java");
 		CompilationUnit ast = CleanUpApplier.parse(
-				SOURCE, CleanUpConstants.DEFAULT_COMPILER_OPTIONS, stub, "Foo.java");
+				SOURCE, CleanUpConstants.DEFAULT_COMPILER_OPTIONS, "Foo.java");
 		assertThat(ast).isNotNull();
 		// setKind(K_COMPILATION_UNIT) → we get a CompilationUnit, not a Block etc. Removing the
 		// setKind call would default to K_CLASS_BODY_DECLARATIONS, producing a different node type.
@@ -389,10 +393,19 @@ class CleanUpApplierTest {
 	void parseResolvesBindingsForKnownTypes() {
 		// Drives setResolveBindings(true). With it disabled, resolveBinding returns null.
 		String src = "public class Foo { java.lang.String field; }";
-		StubCompilationUnit stub = new StubCompilationUnit(src, "Foo.java");
-		CompilationUnit ast = CleanUpApplier.parse(src, CleanUpConstants.DEFAULT_COMPILER_OPTIONS, stub, "Foo.java");
+		CompilationUnit ast = CleanUpApplier.parse(src, CleanUpConstants.DEFAULT_COMPILER_OPTIONS, "Foo.java");
 		AbstractTypeDeclaration topType = (AbstractTypeDeclaration) ast.types().get(0);
 		assertThat(topType.resolveBinding()).as("setResolveBindings(true) → AST has bindings").isNotNull();
+	}
+
+	@Test
+	void parseRecoversBindingsForTypesOutsideTheRuntimeClasspath() {
+		String source = "public class Foo { MissingApplicationType field; }";
+		CompilationUnit ast = CleanUpApplier.parse(source, CleanUpConstants.DEFAULT_COMPILER_OPTIONS, "Foo.java");
+		AbstractTypeDeclaration type = (AbstractTypeDeclaration) ast.types().get(0);
+		FieldDeclaration field = (FieldDeclaration) type.bodyDeclarations().get(0);
+		assertThat(field.getType().resolveBinding()).isNotNull();
+		assertThat(field.getType().resolveBinding().isRecovered()).isTrue();
 	}
 
 	@Test
@@ -400,9 +413,8 @@ class CleanUpApplierTest {
 		// setCompilerOptions(...) honours the source-level pin (17). Records were added in 16,
 		// so a parser without our 17 pin (i.e. defaults to 1.4 or similar) can't even parse this.
 		String recordSource = "public record Point(int x, int y) {}";
-		StubCompilationUnit stub = new StubCompilationUnit(recordSource, "Point.java");
 		CompilationUnit ast = CleanUpApplier.parse(
-				recordSource, CleanUpConstants.DEFAULT_COMPILER_OPTIONS, stub, "Point.java");
+				recordSource, CleanUpConstants.DEFAULT_COMPILER_OPTIONS, "Point.java");
 		assertThat(ast).isNotNull();
 		// Record syntax must parse without producing problems on Java 17.
 		assertThat(ast.types()).isNotEmpty();
@@ -414,8 +426,7 @@ class CleanUpApplierTest {
 		// setUnitName drives the unit-name-vs-public-type validation inside the parser. We
 		// observe its effect via the typeRoot we wired in: typeRoot.getElementName() must
 		// equal the unit name we passed.
-		StubCompilationUnit stub = new StubCompilationUnit(SOURCE, "Foo.java");
-		CompilationUnit ast = CleanUpApplier.parse(SOURCE, CleanUpConstants.DEFAULT_COMPILER_OPTIONS, stub, "Foo.java");
+		CompilationUnit ast = CleanUpApplier.parse(SOURCE, CleanUpConstants.DEFAULT_COMPILER_OPTIONS, "Foo.java");
 		assertThat(ast.getTypeRoot().getElementName()).isEqualTo("Foo.java");
 	}
 
@@ -431,8 +442,7 @@ class CleanUpApplierTest {
 				"    xs.add(\n" + // missing argument and closing paren — statement-level error
 				"  }\n" +
 				"}\n";
-		StubCompilationUnit stub = new StubCompilationUnit(malformed, "Foo.java");
-		CompilationUnit ast = CleanUpApplier.parse(malformed, CleanUpConstants.DEFAULT_COMPILER_OPTIONS, stub, "Foo.java");
+		CompilationUnit ast = CleanUpApplier.parse(malformed, CleanUpConstants.DEFAULT_COMPILER_OPTIONS, "Foo.java");
 		assertThat(ast).isNotNull();
 		assertThat(ast.types()).isNotEmpty();
 		AbstractTypeDeclaration topType = (AbstractTypeDeclaration) ast.types().get(0);
@@ -446,19 +456,28 @@ class CleanUpApplierTest {
 	}
 
 	@Test
+	void parseUsesTheDeclaredPackageRatherThanCommentsOrTheDefaultPackage() {
+		String source = "/* package misleading; */ package com.example.deep; public class Foo {}";
+		CompilationUnit ast = CleanUpApplier.parse(source, CleanUpConstants.DEFAULT_COMPILER_OPTIONS, "Foo.java");
+		ICompilationUnit unit = (ICompilationUnit) ast.getTypeRoot();
+		assertThat(unit.getParent().getElementName()).isEqualTo("com.example.deep");
+		assertThat(unit.getParent().exists()).isTrue();
+		assertThat(unit.getParent().getParent()).isInstanceOf(StubPackageFragmentRoot.class);
+	}
+
+	@Test
 	void parseWiresStubAsTypeRoot() {
-		StubCompilationUnit stub = new StubCompilationUnit(SOURCE, "Foo.java");
 		CompilationUnit ast = CleanUpApplier.parse(
-				SOURCE, CleanUpConstants.DEFAULT_COMPILER_OPTIONS, stub, "Foo.java");
-		// linkStubAsTypeRoot was called by parse(): typeRoot now points at our stub.
-		assertThat(ast.getTypeRoot()).isSameAs(stub);
+				SOURCE, CleanUpConstants.DEFAULT_COMPILER_OPTIONS, "Foo.java");
+		assertThat(ast.getTypeRoot()).isInstanceOf(StubCompilationUnit.class);
+		assertThat(new String(((StubCompilationUnit) ast.getTypeRoot()).getContents())).isEqualTo(SOURCE);
+		assertThat(ast.getTypeRoot().getParent().getElementName()).isEmpty();
 	}
 
 	@Test
 	void linkStubAsTypeRootInstallsTheStub() {
-		StubCompilationUnit stub = new StubCompilationUnit(SOURCE, "Foo.java");
 		CompilationUnit ast = CleanUpApplier.parse(
-				SOURCE, CleanUpConstants.DEFAULT_COMPILER_OPTIONS, stub, "Foo.java");
+				SOURCE, CleanUpConstants.DEFAULT_COMPILER_OPTIONS, "Foo.java");
 		// Re-link with a fresh stub to verify linkStubAsTypeRoot replaces the existing wiring.
 		StubCompilationUnit other = new StubCompilationUnit(SOURCE, "Other.java");
 		CleanUpApplier.linkStubAsTypeRoot(ast, other);
@@ -468,17 +487,15 @@ class CleanUpApplierTest {
 	@Test
 	void runPreConditionCheckInvokesCleanUpsCheckPreConditions() {
 		CleanUpFixtures.PreConditionTracker tracker = new CleanUpFixtures.PreConditionTracker();
-		StubCompilationUnit stub = new StubCompilationUnit(SOURCE, "Foo.java");
-		CleanUpApplier.runPreConditionCheck(tracker, stub);
+		assertThat(CleanUpApplier.apply(tracker, SOURCE)).isEqualTo(SOURCE);
 		assertThat(tracker.checkPreConditionsCalled).isTrue();
 	}
 
 	@Test
 	void runPreConditionCheckSwallowsRuntimeAndLogsIt() {
 		CleanUpFixtures.PreConditionThrows thrower = new CleanUpFixtures.PreConditionThrows();
-		StubCompilationUnit stub = new StubCompilationUnit(SOURCE, "Foo.java");
 		// Must not propagate even though checkPreConditions throws.
-		CleanUpApplier.runPreConditionCheck(thrower, stub);
+		assertThat(CleanUpApplier.apply(thrower, SOURCE)).isEqualTo(SOURCE);
 		assertThat(CAPTURED_LOG).anySatisfy(record -> {
 			assertThat(record.getMessage())
 					.contains("PreConditionThrows")
@@ -487,29 +504,38 @@ class CleanUpApplierTest {
 	}
 
 	@Test
-	void rethrowForTestingSurfacesUnderlyingException() {
-		// Documents the test-only seam: when RETHROW_FOR_TESTING is true, the catch in apply()
-		// rethrows wrapped instead of returning the source unchanged. Used by the happy-path
-		// test above for diagnosis.
-		try {
-			Field rethrow = CleanUpApplier.class.getDeclaredField("RETHROW_FOR_TESTING");
-			rethrow.setAccessible(true);
-			rethrow.setBoolean(null, true);
-			assertThatThrownBy(() -> CleanUpApplier.apply(new CleanUpFixtures.ThrowingRuntime(), SOURCE))
-					.isInstanceOf(RuntimeException.class)
-					.hasMessageContaining("rethrown for testing")
-					.hasCauseInstanceOf(IllegalStateException.class);
-		} catch (NoSuchFieldException | IllegalAccessException e) {
-			throw new AssertionError(e);
-		} finally {
-			try {
-				Field rethrow = CleanUpApplier.class.getDeclaredField("RETHROW_FOR_TESTING");
-				rethrow.setAccessible(true);
-				rethrow.setBoolean(null, false);
-			} catch (NoSuchFieldException | IllegalAccessException ignored) {
-				// fall through
+	void preconditionErrorPreventsCreatingAChange() {
+		CleanUpFixtures.RenameFooToBarFix fix = new CleanUpFixtures.RenameFooToBarFix() {
+			@Override
+			public RefactoringStatus checkPreConditions(IJavaProject project, ICompilationUnit[] units, IProgressMonitor monitor) {
+				return RefactoringStatus.createErrorStatus("unsafe refactoring");
 			}
-		}
+		};
+		assertThat(CleanUpApplier.apply(fix, SOURCE)).isEqualTo(SOURCE);
+		assertThat(fix.createFixCalled).isFalse();
+	}
+
+	@Test
+	void postconditionErrorDiscardsTheChange() {
+		CleanUpFixtures.RenameFooToBarFix fix = new CleanUpFixtures.RenameFooToBarFix() {
+			@Override
+			public RefactoringStatus checkPostConditions(IProgressMonitor monitor) {
+				return RefactoringStatus.createErrorStatus("unsafe change");
+			}
+		};
+		assertThat(CleanUpApplier.apply(fix, SOURCE)).isEqualTo(SOURCE);
+		assertThat(fix.createChangeCalled).isTrue();
+	}
+
+	@Test
+	void preconditionWarningStillAllowsAChange() {
+		CleanUpFixtures.RenameFooToBarFix fix = new CleanUpFixtures.RenameFooToBarFix() {
+			@Override
+			public RefactoringStatus checkPreConditions(IJavaProject project, ICompilationUnit[] units, IProgressMonitor monitor) {
+				return RefactoringStatus.createWarningStatus("review recommended");
+			}
+		};
+		assertThat(CleanUpApplier.apply(fix, SOURCE)).isEqualTo("public class Bar {}");
 	}
 
 	// =========================================================================

@@ -15,6 +15,8 @@
  */
 package com.diffplug.spotless.maven.java;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import org.junit.jupiter.api.Test;
 
 import com.diffplug.spotless.maven.MavenIntegrationHarness;
@@ -39,6 +41,56 @@ class EclipseCleanUpStepTest extends MavenIntegrationHarness {
 		setFile(path).toResource("java/eclipse/cleanup/CleanUpExample.test");
 		mavenRunner().withArguments("spotless:apply").runNoError();
 		assertFile(path).sameAsResource("java/eclipse/cleanup/CleanUpExample.clean");
+	}
+
+	@Test
+	void strictModeFailsAndTolerantModeWarnsForUnsupportedOptions() throws Exception {
+		String path = "src/main/java/test/Simple.java";
+		setFile(path).toResource("java/eclipse/cleanup/Simple.test");
+		for (boolean strict : new boolean[]{true, false}) {
+			writePomWithJavaSteps(
+					"<eclipseCleanUp><strict>" + strict + "</strict><settings>",
+					"<cleanup.no_such_action>true</cleanup.no_such_action>",
+					"<cleanup.make_variable_declarations_final>true</cleanup.make_variable_declarations_final>",
+					"<cleanup.make_local_variable_final>true</cleanup.make_local_variable_final>",
+					"</settings></eclipseCleanUp>");
+			var runner = mavenRunner().withArguments("spotless:apply");
+			var result = strict ? runner.runHasError() : runner.runNoError();
+			assertThat(result.stdOutUtf8() + result.stdErrUtf8()).contains("cleanup.no_such_action", "not implemented", "Simple.java");
+			assertFile(path).sameAsResource("java/eclipse/cleanup/Simple." + (strict ? "test" : "clean"));
+		}
+	}
+
+	@Test
+	void java21AndStrictModeArePassedToTheCleanupEngine() throws Exception {
+		writePomWithJavaSteps(
+				"<eclipseCleanUp><javaVersion>21</javaVersion><strict>true</strict><settings>",
+				"<cleanup.make_variable_declarations_final>true</cleanup.make_variable_declarations_final>",
+				"<cleanup.make_local_variable_final>true</cleanup.make_local_variable_final>",
+				"</settings></eclipseCleanUp>");
+		String path = "src/main/java/example/Java21.java";
+		setFile(path).toResource("java/eclipse/cleanup/Java21.test");
+		mavenRunner().withArguments("spotless:apply").runNoError();
+		assertFile(path).sameAsResource("java/eclipse/cleanup/Java21.clean");
+	}
+
+	@Test
+	void headlessRefactoringsApplyAndThenPassCheck() throws Exception {
+		writePomWithJavaSteps(
+				"<eclipseCleanUp><settings>",
+				"<cleanup.instanceof>true</cleanup.instanceof>",
+				"<cleanup.convert_to_switch_expressions>true</cleanup.convert_to_switch_expressions>",
+				"<cleanup.convert_to_enhanced_for_loop>true</cleanup.convert_to_enhanced_for_loop>",
+				"</settings></eclipseCleanUp>");
+		String[] names = {"PatternInstanceof", "SwitchExpression", "ConvertLoop", "ImportLoop", "ImportConflict"};
+		for (String name : names) {
+			setFile("src/main/java/" + name + ".java").toResource("java/eclipse/cleanup/" + name + ".test");
+		}
+		mavenRunner().withArguments("spotless:apply").runNoError();
+		for (String name : names) {
+			assertFile("src/main/java/" + name + ".java").sameAsResource("java/eclipse/cleanup/" + name + ".clean");
+		}
+		mavenRunner().withArguments("spotless:check").runNoError();
 	}
 
 	@Test

@@ -3,8 +3,8 @@ package test;
 public class ConvertLoop {
 	public int sum(int[] values) {
 		int total = 0;
-		for (int element : values) {
-			total += element;
+		for (int value : values) {
+			total += value;
 		}
 		return total;
 	}

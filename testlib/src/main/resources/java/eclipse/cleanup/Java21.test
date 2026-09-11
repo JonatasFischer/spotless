@@ -1,0 +1,11 @@
+package example;
+
+public class Java21 {
+	public int size(Object value) {
+		int size = switch (value) {
+		case String text -> text.length();
+		default -> 0;
+		};
+		return size;
+	}
+}

@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2025 DiffPlug
+ * Copyright 2016-2026 DiffPlug
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,11 +21,13 @@ import static java.util.stream.Collectors.toSet;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
 import org.apache.maven.plugin.logging.Log;
+import org.apache.maven.project.MavenProject;
 import org.eclipse.aether.RepositorySystem;
 import org.eclipse.aether.RepositorySystemSession;
 import org.eclipse.aether.artifact.Artifact;
@@ -87,6 +89,34 @@ public class ArtifactResolver {
 		} catch (DependencyResolutionException e) {
 			throw new ArtifactResolutionException("Unable to resolve dependencies", e);
 		}
+	}
+
+	/**
+	 * Resolves all dependencies (all scopes) of the given Maven project using the
+	 * specified artifact repositories. Returns the set of resolved JAR files.
+	 */
+	public Set<File> resolveProjectDependencies(MavenProject project, List<RemoteRepository> artifactRepositories) {
+		List<Dependency> dependencies = project.getDependencies().stream()
+				.map(d -> new Dependency(
+						new DefaultArtifact(d.getGroupId(), d.getArtifactId(), d.getClassifier(), d.getType(), d.getVersion()),
+						d.getScope()))
+				.collect(toList());
+
+		if (dependencies.isEmpty()) {
+			return Collections.emptySet();
+		}
+
+		CollectRequest collectRequest = new CollectRequest(dependencies, null, artifactRepositories);
+		DependencyRequest dependencyRequest = new DependencyRequest(collectRequest, null);
+		DependencyResult dependencyResult = resolveDependencies(dependencyRequest);
+
+		return dependencyResult.getArtifactResults()
+				.stream()
+				.map(ArtifactResult::getArtifact)
+				.filter(Objects::nonNull)
+				.map(Artifact::getFile)
+				.filter(Objects::nonNull)
+				.collect(toSet());
 	}
 
 	private void logResolved(ArtifactResult artifactResult) {

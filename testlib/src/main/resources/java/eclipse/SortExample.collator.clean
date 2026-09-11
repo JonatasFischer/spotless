@@ -1,0 +1,15 @@
+package com.diffplug.spotless.extra.glue.jdt;
+
+public class SortExample {
+	private static void mab() {
+	}
+
+	private static void mAc() {
+	}
+
+	private static void mp(String a, String b, int a) {
+	}
+
+	private static void mp(String a, String b, String p) {
+	}
+}

@@ -62,6 +62,66 @@ class JavaEclipseCleanUpTest extends GradleIntegrationHarness {
 	}
 
 	@Test
+	void java21AndStrictModeArePassedToTheCleanupEngine() throws IOException {
+		setFile("build.gradle").toLines(
+				"plugins { id 'com.diffplug.spotless'; id 'java' }",
+				"repositories { mavenCentral() }",
+				"spotless { java { eclipseCleanUp().javaVersion('21').strict(true).configProperties('''",
+				"cleanup.make_variable_declarations_final=true",
+				"cleanup.make_local_variable_final=true",
+				"''') } }");
+		String path = "src/main/java/example/Java21.java";
+		setFile(path).toResource("java/eclipse/cleanup/Java21.test");
+		gradleRunner().withArguments("spotlessApply").build();
+		assertFile(path).sameAsResource("java/eclipse/cleanup/Java21.clean");
+	}
+
+	@Test
+	void strictModeFailsAndTolerantModeWarnsForUnsupportedOptions() throws IOException {
+		setFile("build.gradle").toLines(
+				"plugins { id 'com.diffplug.spotless'; id 'java' }",
+				"repositories { mavenCentral() }",
+				"spotless { java { eclipseCleanUp().strict(project.hasProperty('strictCleanup')).configProperties('''",
+				"cleanup.no_such_action=true",
+				"cleanup.make_variable_declarations_final=true",
+				"cleanup.make_local_variable_final=true",
+				"''') } }");
+		String path = "src/main/java/test/Simple.java";
+		setFile(path).toResource("java/eclipse/cleanup/Simple.test");
+		String strict = gradleRunner().withArguments("spotlessApply", "-PstrictCleanup").buildAndFail().getOutput();
+		assertThat(strict).contains("cleanup.no_such_action", "not implemented", "Simple.java");
+		assertFile(path).sameAsResource("java/eclipse/cleanup/Simple.test");
+		String tolerant = gradleRunner().withArguments("spotlessApply").build().getOutput();
+		assertThat(tolerant).contains("cleanup.no_such_action", "not implemented", "Simple.java");
+		assertFile(path).sameAsResource("java/eclipse/cleanup/Simple.clean");
+	}
+
+	@Test
+	void headlessRefactoringsCompileAndSupportConfigurationCache() throws IOException {
+		setFile("build.gradle").toLines(
+				"plugins { id 'com.diffplug.spotless'; id 'java' }",
+				"repositories { mavenCentral() }",
+				"spotless { java { eclipseCleanUp().javaVersion('21').strict(true).configProperties('''",
+				"cleanup.instanceof=true",
+				"cleanup.convert_to_switch_expressions=true",
+				"cleanup.convert_to_enhanced_for_loop=true",
+				"''') } }",
+				"tasks.named('compileJava') { dependsOn 'spotlessApply' }");
+		String[] names = {"PatternInstanceof", "SwitchExpression", "ConvertLoop", "ImportLoop", "ImportConflict"};
+		for (String name : names) {
+			setFile("src/main/java/" + name + ".java").toResource("java/eclipse/cleanup/" + name + ".test");
+		}
+		gradleRunner().withArguments("spotlessApply").build();
+		for (String name : names) {
+			assertFile("src/main/java/" + name + ".java").sameAsResource("java/eclipse/cleanup/" + name + ".clean");
+		}
+		// Verify reuse with stable source files after the initial formatting pass.
+		gradleRunner().withArguments("compileJava", "--configuration-cache").build();
+		String output = gradleRunner().withArguments("compileJava", "--configuration-cache").build().getOutput();
+		assertThat(output).contains("Reusing configuration cache.");
+	}
+
+	@Test
 	void cleanUpInvalidVersionFailsFast() throws IOException {
 		setFile("build.gradle").toLines(
 				"plugins {",
