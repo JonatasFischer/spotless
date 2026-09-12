@@ -11,6 +11,7 @@ We adhere to the [keepachangelog](https://keepachangelog.com/en/1.0.0/) format (
 - Eclipse Clean Up supports `javaVersion('21')` (default `17`) and opt-in `strict(true)`. Ignored actions now emit visible diagnostics, including unsupported enabled profile options and incompatible language levels.
 
 ### Fixed
+- Eclipse Clean Up keeps its workspace in the temporary directory instead of creating URL-encoded workspace directories in the project.
 - `versionCatalog()` preserves entries when comments contain unmatched brackets, preserves commas inside quoted strings, and keeps significant line boundaries in multiline entries. ([#3042](https://github.com/diffplug/spotless/pull/3042))
 - `versionCatalog()` now reports unfinished entries as lints at their starting line. These fail formatting by default, so upgrading may expose catalog errors that previously caused silent data loss. ([#3042](https://github.com/diffplug/spotless/pull/3042))
 

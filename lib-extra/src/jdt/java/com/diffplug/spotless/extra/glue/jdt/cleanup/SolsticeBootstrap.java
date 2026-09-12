@@ -100,7 +100,9 @@ public final class SolsticeBootstrap {
 		Map<String, String> props = Map.of(
 				"osgi.nl", "en_US",
 				Constants.FRAMEWORK_STORAGE_CLEAN, Constants.FRAMEWORK_STORAGE_CLEAN_ONFIRSTINIT,
-				EquinoxLocations.PROP_INSTANCE_AREA, instanceArea.toAbsolutePath().toString());
+				// Configure Eclipse's default location rather than Solstice's explicit instance-area property.
+				// Solstice 1.8.2 URL-encodes the latter into a relative JarUrlResolver directory in the cwd.
+				EquinoxLocations.PROP_INSTANCE_AREA_DEFAULT, instanceArea.toUri().toString());
 
 		solstice.openShim(props);
 		ShimIdeBootstrapServices.apply(props, solstice.getContext());
@@ -123,28 +125,35 @@ public final class SolsticeBootstrap {
 	 * temp folder until the OS reclaims them.
 	 */
 	private static void registerInstanceAreaCleanup(Path instanceArea) {
-		Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+		Runtime.getRuntime().addShutdownHook(new Thread(instanceAreaCleanup(instanceArea), "spotless-jdt-cleanup-tempdir-cleanup"));
+	}
+
+	static Runnable instanceAreaCleanup(Path instanceArea) {
+		// Maven can close the formatter's classloader before JVM shutdown. Load the visitor now,
+		// while its bytecode is still available, rather than trying to load it inside the hook.
+		SimpleFileVisitor<Path> visitor = new SimpleFileVisitor<Path>() {
+			@Override
+			public FileVisitResult visitFile(Path f, BasicFileAttributes attrs) throws IOException {
+				Files.deleteIfExists(f);
+				return FileVisitResult.CONTINUE;
+			}
+
+			@Override
+			public FileVisitResult postVisitDirectory(Path d, IOException exc) throws IOException {
+				Files.deleteIfExists(d);
+				return FileVisitResult.CONTINUE;
+			}
+		};
+		return () -> {
 			try {
 				if (!Files.exists(instanceArea)) {
 					return;
 				}
-				Files.walkFileTree(instanceArea, new SimpleFileVisitor<Path>() {
-					@Override
-					public FileVisitResult visitFile(Path f, BasicFileAttributes attrs) throws IOException {
-						Files.deleteIfExists(f);
-						return FileVisitResult.CONTINUE;
-					}
-
-					@Override
-					public FileVisitResult postVisitDirectory(Path d, IOException exc) throws IOException {
-						Files.deleteIfExists(d);
-						return FileVisitResult.CONTINUE;
-					}
-				});
+				Files.walkFileTree(instanceArea, visitor);
 			} catch (IOException ignored) {
 				// shutdown-hook best-effort; nothing actionable on failure
 			}
-		}, "spotless-jdt-cleanup-tempdir-cleanup"));
+		};
 	}
 
 	/**
